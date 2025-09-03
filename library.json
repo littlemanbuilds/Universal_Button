@@ -1,0 +1,31 @@
+{
+  "name": "Universal_Button",
+  "version": "1.0.0",
+  "description": "Generic multi-button handler with debounce and short/long press events. Pluggable reader functions (GPIO/expanders), per-button config, enum overloads, and helpers.",
+  "keywords": "button, debounce, short-press, long-press, event, input, gpio, mcp23017, expander, arduino, esp32",
+  "license": "MIT",
+  "authors": [
+    { "name": "Little Man Builds", "email": "littlemanbuilds@gmail.com", "maintainer": true }
+  ],
+  "homepage": "https://github.com/LittleManBuilds/Universal_Button",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/LittleManBuilds/Universal_Button.git"
+  },
+  "frameworks": "arduino",
+  "platforms": "*",
+  "headers": ["Universal_Button.h"],
+  "build": {
+    "includeDir": "src",
+    "srcFilter": [
+      "+<src/>"
+    ]
+  },
+  "examples": [
+    "examples/01_Basic_Button/01_Basic_Button.ino",
+    "examples/02_Press_Type/02_Press_Type.ino",
+    "examples/03_Local_Enum/03_Local_Enum.ino",
+    "examples/04_Port_Expander/04_Port_Expander.ino",
+    "examples/05_Cached_Read/05_Cached_Read.ino"
+  ]
+}

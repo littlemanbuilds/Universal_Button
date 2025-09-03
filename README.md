@@ -46,6 +46,7 @@ Generic multi-button handler for Arduino/ESP platforms with solid debounce and s
     - [3) `Port_Expander` (MCP23017)](#3-port_expander-mcp23017)
     - [4) `Cached_Read` (MCP23017 snapshot)](#4-cached_read-mcp23017-snapshot)
     - [5) `Durations` (exact ms on release)](#5-durations-exact-ms-on-release)
+    - [6) `Per-button overrides` (timing/polarity/enable)](#6-per-button-overrides-timingpolarityenable)
   - [Mixed Inputs (GPIO + Expander)](#mixed-inputs-gpio--expander)
   - [Performance Notes](#performance-notes)
   - [FAQ](#faq)
@@ -99,11 +100,11 @@ Universal_Button/
 │  ├─ Universal_Button_Utils.h     # Small mapping helpers (device-agnostic)
 │  └─ Universal_Button.h           # Easy header + factories
 ├─ examples/
-│  ├─ 01_Basic_Button/Basic_Button.ino
-│  ├─ 02_Press_Type/Press_Type.ino
-│  ├─ 03_Port_Expander/Port_Expander.ino
-│  ├─ 04_Cached_Read/04_Cached_Read.ino
-│  └─ 05_Durations/Durations.ino
+│  ├─ 01_Basic_Button/01_Basic_Button.ino
+│  ├─ 02_Press_Type/02_Press_Type.ino
+│  ├─ 03_Local_Enum/03_Local_Enum.ino
+│  ├─ 04_Port_Expander/04_Port_Expander.ino
+│  └─ 05_Cached_Read/05_Cached_Read.ino
 ├─ library.properties
 ├─ library.json
 └─ keywords.txt
@@ -129,14 +130,14 @@ This generates:
 - `enum class ButtonIndex : uint8_t { Start, Stop, _COUNT };`
 - `struct ButtonPins { static constexpr uint8_t Start=4; static constexpr uint8_t Stop=5; };`
 
-A **default** mapping is provided (single `TestButton` on pin 7) if you do nothing.
+A **default** mapping is provided (single `TestButton` on pin 25) if you do nothing.
 
 ---
 
 ## Quick Use (Easy Header)
 
 ```cpp
-#define BUTTON_LIST(X) X(TestButton, 7)
+#define BUTTON_LIST(X) X(TestButton, 25)
 #include <Universal_Button.h>
 
 static Button btns = makeButtons();  // uses BUTTON_PINS/NUM_BUTTONS
@@ -242,7 +243,7 @@ void clearPressType(uint8_t id) noexcept;
 [[nodiscard]] uint32_t heldMillis(uint8_t id) const noexcept;
 void reset() noexcept;
 
-// NEW: exact duration of last completed press (ms)
+// Exact duration of last completed press (ms)
 [[nodiscard]] uint32_t getLastPressDuration(uint8_t id) const noexcept;
 template <typename E, enable_if_enum>
 [[nodiscard]] uint32_t getLastPressDuration(E id) const noexcept;
@@ -297,7 +298,7 @@ namespace UB::util {
 Polling `isPressed()` using the config mapping.
 
 ```cpp
-#define BUTTON_LIST(X) X(TestButton, 7)
+#define BUTTON_LIST(X) X(TestButton, 25)
 #include <Universal_Button.h>
 
 static Button btns = makeButtons();
@@ -314,7 +315,7 @@ void loop() {
 Short/long events with custom thresholds.
 
 ```cpp
-#define BUTTON_LIST(X) X(TestButton, 7)
+#define BUTTON_LIST(X) X(TestButton, 25)
 #include <Universal_Button.h>
 
 constexpr ButtonTimingConfig kTiming{50, 300, 1500};
@@ -335,7 +336,7 @@ void loop() {
 Use a simple reader function that routes to MCP or GPIO.
 
 ```cpp
-#define BUTTON_LIST(X) X(Start, 7) X(Stop, 8) X(Mode, 9)
+#define BUTTON_LIST(X) X(Start, 25) X(Stop, 26) X(Mode, 27)
 #include <Universal_Button.h>
 #include <Universal_Button_Utils.h>
 #include <Adafruit_MCP23017.h>
@@ -356,13 +357,13 @@ static Button btns = makeButtonsWithReader(readFromMcp, {}, true);
 Take one I²C snapshot per loop (GPIOA+GPIOB) and serve all reads from it for coherence and speed.
 
 ```cpp
-struct Snap { uint8_t A{0xFF}, B{0xFF}; inline uint8_t bit(uint8_t p) const {
+struct Snap { uint8_t A{0xFF}, B{0xFF}; inline uint8_t getBit(uint8_t p) const {
   return (p<8) ? ((A>>p)&1) : ((B>>(p-8))&1);
 }} snap;
 
 static bool readFromSnapshot(uint8_t key) {
   const uint8_t idx = UB::util::indexFromKey(key);
-  if (idx < NUM_BUTTONS) return snap.bit(MCP_PINS[idx]) == 0; // LOW = pressed
+  if (idx < NUM_BUTTONS) return snap.getBit(MCP_PINS[idx]) == 0; // LOW = pressed
   return digitalRead(key) == LOW;
 }
 ```
@@ -371,7 +372,7 @@ static bool readFromSnapshot(uint8_t key) {
 Get the **exact** duration of the last completed press, alongside classification.
 
 ```cpp
-#define BUTTON_LIST(X) X(TestButton, 7)
+#define BUTTON_LIST(X) X(TestButton, 25)
 #include <Universal_Button.h>
 
 constexpr ButtonTimingConfig kTiming{50, 300, 1500};
@@ -396,6 +397,51 @@ void loop() {
   }
 
   delay(10);
+}
+```
+
+**Please note**: The library’s “exact ms” is exact with respect to the debounced model and the scheduling granularity. With a 1 ms update and/or micros() as the time base, it’s effectively exact for human interaction without adding complexity.
+
+### 6) `Per-button overrides` (timing/polarity/enable)
+
+Override **just one** button (e.g., `ButtonTest3`) with different timings; others keep the global defaults:
+
+```cpp
+// Global defaults
+constexpr ButtonTimingConfig kTiming{50, 300, 1500};
+static Button btns = makeButtons(kTiming);
+
+void setup() {
+  // ... construct/configure your reader here if needed ...
+
+  ButtonPerConfig one{};
+  one.debounce_ms    = 60;   // non-zero => override
+  one.short_press_ms = 400;
+  one.long_press_ms  = 1800;
+  // one.active_low   = true;  // keep LOW=pressed (default)
+  // one.enabled      = true;  // keep enabled (default)
+
+  btns.setPerConfig(static_cast<uint8_t>(ButtonIndex::ButtonTest3), one);
+}
+```
+
+Override **all Port-B** expander buttons (pins `8..15`) by checking your `MCP_PINS[]` mapping:
+
+```cpp
+// Example mapping for three buttons; ButtonTest3 is on Port B (pin 8)
+constexpr uint8_t MCP_PINS[NUM_BUTTONS] = { 0, 1, 8 };
+
+void setup() {
+  ButtonPerConfig portB{};
+  portB.debounce_ms    = 60;
+  portB.short_press_ms = 400;
+  portB.long_press_ms  = 1800;
+
+  for (uint8_t i = 0; i < NUM_BUTTONS; ++i) {
+    if (MCP_PINS[i] >= 8) {          // Port B
+      btns.setPerConfig(i, portB);   // override those only
+    }
+  }
 }
 ```
 
