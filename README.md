@@ -28,8 +28,7 @@ Generic multi-button handler for Arduino/ESP platforms with solid debounce and s
   - [Highlights](#highlights)
   - [Contents](#contents)
   - [Install](#install)
-    - [Arduino IDE](#arduino-ide)
-    - [PlatformIO](#platformio)
+  - [Install](#install-1)
   - [Concepts](#concepts)
   - [Files \& Structure](#files--structure)
   - [Configuration Mapping](#configuration-mapping)
@@ -56,21 +55,11 @@ Generic multi-button handler for Arduino/ESP platforms with solid debounce and s
 
 ## Install
 
-### Arduino IDE
-1. Copy the `src/` folder and library manifest files into your `Arduino/libraries/Universal_Button` directory.  
-2. Restart the IDE.
+## Install
 
-### PlatformIO
-```ini
-; example platformio.ini
-[env:esp32s3]
-platform = espressif32
-framework = arduino
-board = esp32-s3-devkitc-1
-lib_deps =
-    ; If you use the MCP23017 examples:
-    adafruit/Adafruit MCP23017 Arduino Library
-```
+**Arduino IDE:** search **ESP32_MCPWM** in Library Manager.  
+**Manual:** download the release ZIP → *Sketch → Include Library → Add .ZIP Library…*  
+**PlatformIO:** add to `lib_deps` or install from ZIP.
 > The core library **does not** force an MCP dependency. Only examples that use MCP include it.
 
 ---
