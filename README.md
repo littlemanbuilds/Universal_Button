@@ -57,9 +57,9 @@ Generic multi-button handler for Arduino/ESP platforms with solid debounce and s
 
 ## Install
 
-**Arduino IDE:** search **ESP32_MCPWM** in Library Manager.  
+**Arduino IDE:** search **UNIVERSAL_BUTTON** in Library Manager.  
 **Manual:** download the release ZIP → *Sketch → Include Library → Add .ZIP Library…*  
-**PlatformIO:** add to `lib_deps` or install from ZIP.
+**PlatformIO:** Search libraries and add to `lib_deps` or install from ZIP.
 > The core library **does not** force an MCP dependency. Only examples that use MCP include it.
 
 ---
@@ -328,7 +328,7 @@ Use a simple reader function that routes to MCP or GPIO.
 #define BUTTON_LIST(X) X(Start, 25) X(Stop, 26) X(Mode, 27)
 #include <Universal_Button.h>
 #include <Universal_Button_Utils.h>
-#include <Adafruit_MCP23017.h>
+#include <Adafruit_MCP23X17.h>
 
 constexpr uint8_t MCP_PINS[NUM_BUTTONS] = {0, 1, 8};
 Adafruit_MCP23017 mcp;
