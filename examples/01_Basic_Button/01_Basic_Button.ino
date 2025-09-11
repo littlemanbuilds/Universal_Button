@@ -4,7 +4,7 @@
  * @brief Basic demo using easy header + isPressed() polling.
  */
 
-// Explicit button mapping (compile-time). MUST be BEFORE any header includes.
+// Explicit button mapping (compile-time). MUST be BEFORE <Universal_Button> header include.
 #define BUTTON_LIST(X) \
     X(TestButton, 7) ///< INPUT_PULLUP (pressed == LOW).
 

@@ -323,6 +323,7 @@ void loop() {
 
 ### 3) `Port_Expander` (MCP23017)
 Use a simple reader function that routes to MCP or GPIO.
+When using a port expander, these numbers are irrelevant as they will be re-mapped to MCP pins. Just ensure that they're different.
 
 ```cpp
 #define BUTTON_LIST(X) X(Start, 25) X(Stop, 26) X(Mode, 27)

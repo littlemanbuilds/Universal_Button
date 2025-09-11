@@ -4,7 +4,8 @@
  * @brief Use MCP23017 port expander as the button source (short/long events).
  */
 
-// Explicit button mapping (compile-time). MUST be BEFORE any header includes.
+// Explicit button mapping (compile-time). MUST be BEFORE <Universal_Button> header include.
+// When using a port expander, ButtonTest numbers are irrelevant e.g. 60, 61, 62... as long as they're different.
 #define BUTTON_LIST(X) \
     X(ButtonTest1, 7)  \
     X(ButtonTest2, 8)  \
