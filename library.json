@@ -1,6 +1,6 @@
 {
   "name": "Universal_Button",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Generic multi-button handler with debounce and short/long press events. Pluggable reader functions (GPIO/expanders), per-button config, enum overloads, and helpers.",
   "keywords": "button, debounce, short-press, long-press, event, input, gpio, mcp23017, expander, arduino, esp32",
   "license": "MIT",

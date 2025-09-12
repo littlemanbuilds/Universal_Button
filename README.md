@@ -4,21 +4,18 @@ Generic multi-button handler for Arduino/ESP platforms with solid debounce and s
 
 > **Author:** Little Man Builds  
 > **License:** MIT  
-> **Version:** `1.0.0`
+> **Version:** `1.1.0`
 
 ---
 
 ## Highlights
 
-- **Rock-solid debounce** using *raw* vs *committed* state with time-stable windows.
-- **Short/Long press detection** (configurable timings).
-- **Exact last press duration** via `getLastPressDuration(id)`; and **live hold time** via `heldMillis(id)`.
-- **Pluggable readers**: read from GPIO *or* any external device via a callback.
-- **Function-pointer fast path** for small code size, or `std::function` for flexibility.
-- **Per-button overrides** (debounce/thresholds, polarity, enable/disable).
-- **Convenience helpers**: enum overloads, `peekPressType`, `clearPressType`, `heldMillis`, `reset`, `getLastPressDuration`.
-- **Header-only** usage for fast integration.
-- **Examples included**: basic polling, press types, MCP23017 reader, **cached MCP snapshot**.
+- **Rock-solid debounce**
+- **Short/Long press detection**
+- **Exact last press duration**
+- **Convenience helpers**: enum overloads, peek/clear events, `pressedMask()`, `snapshot()`, `forEach()`
+- **Pluggable readers** (GPIO, MCP, custom)
+- **Header-only** integration
 
 ---
 
@@ -30,7 +27,6 @@ Generic multi-button handler for Arduino/ESP platforms with solid debounce and s
   - [Install](#install)
   - [Install](#install-1)
   - [Concepts](#concepts)
-  - [Files \& Structure](#files--structure)
   - [Configuration Mapping](#configuration-mapping)
   - [Quick Use (Easy Header)](#quick-use-easy-header)
   - [API Reference](#api-reference)
@@ -77,38 +73,14 @@ Debounce uses a “raw/committed” split:
 
 ---
 
-## Files & Structure
-
-```
-Universal_Button/
-├─ src/
-│  ├─ ButtonTypes.h                # ButtonPressType, ButtonTimingConfig, ButtonPerConfig
-│  ├─ IButtonHandler.h             # Minimal abstract interface (default no-op reset & duration)
-│  ├─ ButtonHandler.h              # Template handler with debounce/events + helpers + last duration
-│  ├─ ButtonHandler_Config.h       # Mapping via BUTTON_LIST macro
-│  ├─ Universal_Button_Utils.h     # Small mapping helpers (device-agnostic)
-│  └─ Universal_Button.h           # Easy header + factories
-├─ examples/
-│  ├─ 01_Basic_Button/01_Basic_Button.ino
-│  ├─ 02_Press_Type/02_Press_Type.ino
-│  ├─ 03_Local_Enum/03_Local_Enum.ino
-│  ├─ 04_Port_Expander/04_Port_Expander.ino
-│  └─ 05_Cached_Read/05_Cached_Read.ino
-├─ library.properties
-├─ library.json
-└─ keywords.txt
-```
-
----
-
 ## Configuration Mapping
 
 Define your buttons once using `BUTTON_LIST(X)` **before including** `Universal_Button.h` (or any header that uses the mapping).
 
 ```cpp
-#define BUTTON_LIST(X) \
-  X(Start, 4)          \
-  X(Stop,  5)
+#define BUTTON_LIST(X) \  
+X(Start, 4) \
+X(Stop,  5)
 
 #include <Universal_Button.h>
 ```
@@ -119,14 +91,15 @@ This generates:
 - `enum class ButtonIndex : uint8_t { Start, Stop, _COUNT };`
 - `struct ButtonPins { static constexpr uint8_t Start=4; static constexpr uint8_t Stop=5; };`
 
-A **default** mapping is provided (single `TestButton` on pin 25) if you do nothing.
+A **default** mapping is provided (single `TestButton` on pin 25), if you do nothing.
 
 ---
 
 ## Quick Use (Easy Header)
 
 ```cpp
-#define BUTTON_LIST(X) X(TestButton, 25)
+#define BUTTON_LIST(X) \
+X(TestButton, 25)
 #include <Universal_Button.h>
 
 static Button btns = makeButtons();  // uses BUTTON_PINS/NUM_BUTTONS
@@ -236,6 +209,24 @@ void reset() noexcept;
 [[nodiscard]] uint32_t getLastPressDuration(uint8_t id) const noexcept;
 template <typename E, enable_if_enum>
 [[nodiscard]] uint32_t getLastPressDuration(E id) const noexcept;
+```
+
+**Convenience helpers (new):**
+```cpp
+// Compile-time size (number of logical buttons)
+static constexpr uint8_t size() noexcept;
+
+// Bitmask of pressed buttons (bit i == 1 when pressed). Requires N <= 32.
+[[nodiscard]] uint32_t pressedMask() const noexcept;
+
+// Snapshot logical states into a std::bitset<N>
+void snapshot(std::bitset<N>& out) const noexcept;
+
+// Return a std::bitset<N> by value
+[[nodiscard]] std::bitset<N> snapshot() const noexcept;
+
+// Iterate over all buttons without manual loops/casts
+template <typename F> void forEach(F&& f) const noexcept; // f(index, pressed)
 ```
 
 ### Factories (Easy Header)

@@ -28,6 +28,9 @@ peekPressType	KEYWORD2
 clearPressType	KEYWORD2
 heldMillis	KEYWORD2
 reset	KEYWORD2
+pressedMask	KEYWORD2
+snapshot	KEYWORD2
+forEach	KEYWORD2
 
 # Runtime configuration
 setReadFunc	KEYWORD2

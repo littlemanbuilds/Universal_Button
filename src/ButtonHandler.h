@@ -17,6 +17,7 @@
 #include <stdint.h>
 #include <type_traits>
 #include <cstddef>
+#include <bitset>
 
 /**
  * @brief Generic multi-button handler (adaptable to any digital input source).
@@ -244,7 +245,7 @@ public:
         }
     }
 
-    // ---- Convenience enum overloads (no cast needed in sketches) ----
+    // ---- Convenience enum overloads (no cast needed in sketches) ---- //
 
     /**
      * @brief Enum-friendly overload of isPressed().
@@ -286,7 +287,7 @@ public:
         return getLastPressDuration(static_cast<uint8_t>(buttonId));
     }
 
-    // ---- Runtime setters / helpers ----
+    // ---- Runtime setters / helpers ---- //
 
     /// @brief Swap the std::function reader at runtime.
     void setReadFunc(ReadFunc f) noexcept { read_func_ = f; }
@@ -337,6 +338,39 @@ public:
             return 0;
         const uint32_t now = millis();
         return (last_state_[buttonId] && press_start_[buttonId]) ? (now - press_start_[buttonId]) : 0U;
+    }
+
+    // ----Convenience API ---- //
+    static constexpr uint8_t size() noexcept { return static_cast<uint8_t>(N); }
+
+    [[nodiscard]] inline uint32_t pressedMask() const noexcept
+    {
+        static_assert(N <= 32, "pressedMask() requires N <= 32; use bitset snapshot for larger N.");
+        uint32_t m = 0;
+        for (size_t i = 0; i < N; ++i)
+            if (isPressed(static_cast<uint8_t>(i)))
+                m |= (1u << i);
+        return m;
+    }
+
+    inline void snapshot(std::bitset<N> &out) const noexcept
+    {
+        for (size_t i = 0; i < N; ++i)
+            out.set(i, isPressed(static_cast<uint8_t>(i)));
+    }
+
+    [[nodiscard]] inline std::bitset<N> snapshot() const noexcept
+    {
+        std::bitset<N> b;
+        snapshot(b);
+        return b;
+    }
+
+    template <typename F>
+    inline void forEach(F &&f) const noexcept
+    {
+        for (uint8_t i = 0; i < static_cast<uint8_t>(N); ++i)
+            f(i, isPressed(i));
     }
 
 private:
