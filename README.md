@@ -24,8 +24,7 @@ Generic multi-button handler for Arduino/ESP platforms with solid debounce and s
 - [Universal\_Button](#universal_button)
   - [Highlights](#highlights)
   - [Contents](#contents)
-  - [Install](#install)
-  - [Install](#install-1)
+  - [🚀 Installation](#-installation)
   - [Concepts](#concepts)
   - [Configuration Mapping](#configuration-mapping)
   - [Quick Use (Easy Header)](#quick-use-easy-header)
@@ -49,9 +48,7 @@ Generic multi-button handler for Arduino/ESP platforms with solid debounce and s
 
 ---
 
-## Install
-
-## Install
+## 🚀 Installation
 
 **Arduino IDE:** search **UNIVERSAL_BUTTON** in Library Manager.  
 **Manual:** download the release ZIP → *Sketch → Include Library → Add .ZIP Library…*  
