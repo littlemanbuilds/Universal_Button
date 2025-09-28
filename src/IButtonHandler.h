@@ -12,7 +12,8 @@
 #pragma once
 
 #include <ButtonTypes.h>
-#include <stdint.h>
+#include <cstdint>
+#include <bitset>
 
 /**
  * @brief Abstract interface for button event handlers.
@@ -53,4 +54,37 @@ public:
      * @brief Reset internal debouncer state and clear pending events.
      */
     virtual void reset() noexcept { /* no-op by default */ }
+
+    /**
+     * @brief Number of logical buttons managed by this handler.
+     * @return Count of buttons (0–255).
+     */
+    [[nodiscard]] virtual uint8_t size() const noexcept = 0;
+
+    /**
+     * @brief Build a 32-bit pressed mask (bit i == 1 iff button i is pressed).
+     */
+    [[nodiscard]] virtual uint32_t pressedMask() const noexcept
+    {
+        uint32_t m = 0;
+        const uint8_t n = size() > 32 ? 32 : size();
+        for (uint8_t i = 0; i < n; ++i)
+            if (isPressed(i))
+                m |= (1u << i);
+        return m;
+    }
+
+    /**
+     * @brief Write the current debounced state into a bitset (bit i == pressed).
+     * @tparam N Size of the destination bitset.
+     * @param out Destination bitset; bits beyond @ref size() remain unchanged/false.
+     */
+    template <size_t N>
+    void snapshot(std::bitset<N> &out) const noexcept
+    {
+        const uint8_t n = static_cast<uint8_t>(N < size() ? N : size());
+        for (uint8_t i = 0; i < n; ++i)
+            out.set(i, isPressed(i));
+        // Any remaining bits (if N > size()) stay default-initialized (false).
+    }
 };

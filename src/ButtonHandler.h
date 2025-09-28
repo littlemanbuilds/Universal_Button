@@ -30,15 +30,19 @@ class ButtonHandler : public IButtonHandler
     static_assert(N > 0, "Button<N>: N must be greater than 0.");
 
 public:
+    // ---- Types ---- //
+
     /**
-     * @brief Type alias for the function used to read button state. Returns true if pressed.
+     * @brief Callable that returns true if the button identified by uint8_t is pressed.
      */
     using ReadFunc = std::function<bool(uint8_t)>;
 
     /**
-     * @brief Optional fast-path reader (function pointer). Smaller code than std::function.
+     * @brief Optional function-pointer fast path (smaller than std::function).
      */
     using ReadFnPtr = bool (*)(uint8_t);
+
+    // ---- Constructors ---- //
 
     /**
      * @brief Construct a Button handler.
@@ -114,6 +118,8 @@ public:
             { return digitalRead(pin) == LOW; };
         }
     }
+
+    // ---- IButtonHandler overrides (core per-button API) ---- //
 
     /**
      * @brief Scan and process button states (debounce and press timing).
@@ -245,7 +251,7 @@ public:
         }
     }
 
-    // ---- Convenience enum overloads (no cast needed in sketches) ---- //
+    // ---- Enum-friendly overloads (no cast needed in sketches) ---- //
 
     /**
      * @brief Enum-friendly overload of isPressed().
@@ -276,7 +282,7 @@ public:
      *        completed press (in milliseconds).
      * @tparam E An enumeration type (SFINAE-constrained) representing a button ID,
      *           e.g. your generated `ButtonIndex` enum.
-     * @param buttonId  Enumerated button identifier (e.g., `ButtonIndex::Start`).
+     * @param buttonId Enumerated button identifier (e.g., `ButtonIndex::Start`).
      * @return Milliseconds of the most recent *completed* press for @p buttonId.
      *         Returns `0` if no press has been recorded yet or if @p buttonId is
      *         out of range.
@@ -341,9 +347,15 @@ public:
     }
 
     // ----Convenience API ---- //
-    static constexpr uint8_t size() noexcept { return static_cast<uint8_t>(N); }
 
-    [[nodiscard]] inline uint32_t pressedMask() const noexcept
+    /// @brief Compile-time button count as a utility for templates/static contexts.
+    static constexpr uint8_t sizeStatic() noexcept { return static_cast<uint8_t>(N); }
+
+    /// @brief Number of logical buttons managed (runtime virtual override).
+    [[nodiscard]] uint8_t size() const noexcept override { return static_cast<uint8_t>(N); }
+
+    /// @brief Build a 32-bit pressed mask (bit i == 1 iff button i is pressed).
+    [[nodiscard]] uint32_t pressedMask() const noexcept override
     {
         static_assert(N <= 32, "pressedMask() requires N <= 32; use bitset snapshot for larger N.");
         uint32_t m = 0;
@@ -353,12 +365,14 @@ public:
         return m;
     }
 
+    /// @brief Write the current debounced state into a bitset (bit i == pressed).
     inline void snapshot(std::bitset<N> &out) const noexcept
     {
         for (size_t i = 0; i < N; ++i)
             out.set(i, isPressed(static_cast<uint8_t>(i)));
     }
 
+    /// @brief Return a bitset containing the current debounced state.
     [[nodiscard]] inline std::bitset<N> snapshot() const noexcept
     {
         std::bitset<N> b;
@@ -366,6 +380,7 @@ public:
         return b;
     }
 
+    /// @brief Apply a functor to each button ID and its debounced state.
     template <typename F>
     inline void forEach(F &&f) const noexcept
     {
