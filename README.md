@@ -4,7 +4,6 @@ Generic multi-button handler for Arduino/ESP platforms with solid debounce and s
 
 > **Author:** Little Man Builds  
 > **License:** MIT  
-> **Version:** `1.1.0`
 
 ---
 

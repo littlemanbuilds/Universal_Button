@@ -31,6 +31,8 @@ reset	KEYWORD2
 pressedMask	KEYWORD2
 snapshot	KEYWORD2
 forEach	KEYWORD2
+size	KEYWORD2
+sizeStatic	KEYWORD2
 
 # Runtime configuration
 setReadFunc	KEYWORD2
