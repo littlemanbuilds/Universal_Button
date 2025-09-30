@@ -32,6 +32,11 @@ public:
     virtual void update() noexcept = 0;
 
     /**
+     * @brief Scan and process button states using a provided timestamp (ms).
+     */
+    virtual void update(uint32_t now_ms) noexcept = 0;
+
+    /**
      * @brief Get debounced state of button.
      * @param buttonId Index of button.
      * @return True if button is pressed.
@@ -77,7 +82,7 @@ public:
     /**
      * @brief Write the current debounced state into a bitset (bit i == pressed).
      * @tparam N Size of the destination bitset.
-     * @param out Destination bitset; bits beyond @ref size() remain unchanged/false.
+     * @param out Destination bitset; bits beyond size() remain unchanged/false.
      */
     template <size_t N>
     void snapshot(std::bitset<N> &out) const noexcept

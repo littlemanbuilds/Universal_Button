@@ -26,7 +26,7 @@ void loop()
 
     if (btns.isPressed(ButtonIndex::TestButton))
     {
-        Serial.println("ButtonTest is pressed!");
+        Serial.println("TestButton is pressed!");
     }
     else
     {

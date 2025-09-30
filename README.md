@@ -40,6 +40,7 @@ Generic multi-button handler for Arduino/ESP platforms with solid debounce and s
     - [4) `Cached_Read` (MCP23017 snapshot)](#4-cached_read-mcp23017-snapshot)
     - [5) `Durations` (exact ms on release)](#5-durations-exact-ms-on-release)
     - [6) `Per-button overrides` (timing/polarity/enable)](#6-per-button-overrides-timingpolarityenable)
+    - [7) `Context-aware reader` (MCP23017)](#7-context-aware-reader-mcp23017)
   - [Mixed Inputs (GPIO + Expander)](#mixed-inputs-gpio--expander)
   - [Performance Notes](#performance-notes)
   - [FAQ](#faq)
@@ -153,6 +154,8 @@ struct ButtonPerConfig {
 };
 ```
 
+`debounce_ms`, `short_press_ms`, `long_press_ms` are stored as `uint32_t` (supporting very large global timings). Per-button overrides (ButtonPerConfig) are `uint16_t` for efficiency.
+
 ### Interface: `IButtonHandler`
 
 ```cpp
@@ -233,25 +236,20 @@ In **`Universal_Button.h`**:
   ```cpp
   using Button = ButtonHandler<NUM_BUTTONS>;
   Button makeButtons(ButtonTimingConfig t = {});
-  Button makeButtonsWithReader(std::function<bool(uint8_t)> read,
-                               ButtonTimingConfig t = {}, bool skipPinInit = true);
-  Button makeButtonsWithReader(bool (*read)(uint8_t),
-                               ButtonTimingConfig t = {}, bool skipPinInit = true);
+  Button makeButtonsWithReader(std::function<bool(uint8_t)> read, ButtonTimingConfig t = {}, bool skipPinInit = true);
+  Button makeButtonsWithReader(bool (*read)(uint8_t),ButtonTimingConfig t = {}, bool skipPinInit = true);
+  Button makeButtonsWithReaderCtx(bool (*read)(void* ctx, uint8_t key), void* ctx, ButtonTimingConfig t = {}, bool skipPinInit = true);
   ```
 - Explicit pins (no config):
   ```cpp
   template <size_t N>
-  ButtonHandler<N> makeButtonsWithPins(const uint8_t (&pins)[N],
-                                       ButtonTimingConfig t = {});
+  ButtonHandler<N> makeButtonsWithPins(const uint8_t (&pins)[N], ButtonTimingConfig t = {});
 
   template <size_t N>
-  ButtonHandler<N> makeButtonsWithPinsAndReader(const uint8_t (&pins)[N],
-                                                std::function<bool(uint8_t)> read,
-                                                ButtonTimingConfig t = {}, bool skipPinInit = true);
+  ButtonHandler<N> makeButtonsWithPinsAndReader(const uint8_t (&pins)[N], std::function<bool(uint8_t)> read, ButtonTimingConfig t = {}, bool skipPinInit = true);
+
   template <size_t N>
-  ButtonHandler<N> makeButtonsWithPinsAndReader(const uint8_t (&pins)[N],
-                                                bool (*read)(uint8_t),
-                                                ButtonTimingConfig t = {}, bool skipPinInit = true);
+  ButtonHandler<N> makeButtonsWithPinsAndReader(const uint8_t (&pins)[N], bool (*read)(uint8_t), ButtonTimingConfig t = {}, bool skipPinInit = true);
   ```
 
 ### Utils
@@ -421,6 +419,44 @@ void setup() {
   }
 }
 ```
+
+### 7) `Context-aware reader` (MCP23017)
+
+Pass a user-defined context pointer to your reader function. Useful when you need to capture both the MCP instance and mapping without globals:
+
+```cpp
+#define BUTTON_LIST(X) X(Start, 25) X(Stop, 26) X(Mode, 27)
+#include <Universal_Button.h>
+#include <Universal_Button_Utils.h>
+#include <Adafruit_MCP23X17.h>
+
+// Context payload
+struct McpCtx {
+  Adafruit_MCP23X17* mcp;
+  const uint8_t* map;
+};
+Adafruit_MCP23X17 mcp;
+constexpr uint8_t MCP_PINS[NUM_BUTTONS] = {0, 1, 8};
+static McpCtx ctx{ &mcp, MCP_PINS };
+
+// Reader: returns true if pressed (LOW)
+static bool mcpReadCtx(void* vctx, uint8_t key) {
+  auto* c = static_cast<McpCtx*>(vctx);
+  const uint8_t idx = UB::util::indexFromKey(key);
+  if (idx < NUM_BUTTONS) return c->mcp->digitalRead(c->map[idx]) == LOW;
+  return digitalRead(key) == LOW; // fallback
+}
+
+// Build handler with context-aware reader
+static Button btns = makeButtonsWithReaderCtx(mcpReadCtx, &ctx, {}, true);
+
+void setup() {
+  Serial.begin(115200);
+  mcp.begin_I2C(0x20);
+  for (uint8_t i = 0; i < NUM_BUTTONS; ++i)
+    mcp.pinMode(MCP_PINS[i], INPUT_PULLUP);
+}
+````
 
 ---
 

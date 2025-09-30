@@ -23,7 +23,7 @@
  *       X(Start, 4)        \
  *       X(Stop,  5)
  *
- * If not defined, default provided (TestButton on GPIO 7).
+ * If not defined, default provided (TestButton on GPIO 25).
  */
 #ifndef BUTTON_LIST
 #define BUTTON_LIST(X) \
