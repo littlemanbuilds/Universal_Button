@@ -1,13 +1,3 @@
-/**
- * MIT License
- *
- * @brief Easy entry-point for the Universal_Button library.
- *
- * @file Universal_Button.h
- * @author Little Man Builds
- * @date 2025-08-30
- */
-
 #pragma once
 
 #include <Arduino.h>
@@ -16,7 +6,7 @@
 
 // ---- Version macro ---- //
 
-#define UNIVERSAL_BUTTON_VERSION "1.3.0"
+#define UNIVERSAL_BUTTON_VERSION "1.4.0"
 
 // ---- Aliases ---- //
 
@@ -59,7 +49,7 @@ inline Button makeButtons(ButtonTimingConfig timing = {}, bool skipPinInit = fal
     return Button(BUTTON_PINS, timing, skipPinInit);
 }
 
-// ---- External readers: function-pointer fast path (bool(uint8_t id)) ---- //
+// ---- External readers (function-pointer fast path) ---- //
 
 /**
  * @brief Config-driven factory with an external function-pointer reader.
@@ -102,7 +92,7 @@ inline ButtonHandler<N> makeButtonsWithPinsAndReader(const uint8_t (&pins)[N],
     return ButtonHandler<N>(pins, read, timing, skipPinInit);
 }
 
-// ---- External readers: context-aware callback (bool(void* ctx, uint8_t id)) ---- //
+// ---- External readers (context-aware callback) ---- //
 
 /**
  * @brief Config-driven factory with a context-aware reader callback.
@@ -146,4 +136,116 @@ inline ButtonHandler<N> makeButtonsWithPinsAndReaderCtx(const uint8_t (&pins)[N]
                                                         bool skipPinInit = true)
 {
     return ButtonHandler<N>(pins, read, ctx, timing, skipPinInit);
+}
+
+// ---- Arduino-free overloads ---- //
+
+/**
+ * @brief Zero-boilerplate factory with explicit pins and optional time source.
+ *
+ * @tparam N Number of buttons (deduced from pins).
+ * @param pins Reference to an array of length N with pin IDs.
+ * @param timing Global debounce/press-duration configuration.
+ * @param skipPinInit If true, GPIO mode is NOT configured in this factory.
+ * @param timeFn Optional time source (ms). nullptr → use millis().
+ * @return A ready-to-use ButtonHandler<N>.
+ */
+template <size_t N>
+inline ButtonHandler<N> makeButtonsWithPins(const uint8_t (&pins)[N],
+                                            ButtonTimingConfig timing,
+                                            bool skipPinInit,
+                                            typename ButtonHandler<N>::TimeFn timeFn)
+{
+    return ButtonHandler<N>(pins, timing, skipPinInit, timeFn);
+}
+
+/**
+ * @brief Config-driven factory with optional time source (uses BUTTON_PINS).
+ *
+ * @param timing Global debounce/press-duration configuration.
+ * @param skipPinInit If true, GPIO mode is NOT configured in this factory.
+ * @param timeFn Optional time source (ms). nullptr → use millis().
+ * @return A ready-to-use Button.
+ */
+inline Button makeButtons(ButtonTimingConfig timing, bool skipPinInit, Button::TimeFn timeFn)
+{
+    return Button(BUTTON_PINS, timing, skipPinInit, timeFn);
+}
+
+/**
+ * @brief Config-driven factory with external fast reader and optional time source.
+ *
+ * @param read Reader: bool(uint8_t id) → pressed?
+ * @param timing Global debounce/press-duration configuration.
+ * @param skipPinInit If true, pinMode is not called for BUTTON_PINS.
+ * @param timeFn Optional time source (ms). nullptr → use millis().
+ * @return A Button sized by NUM_BUTTONS.
+ */
+inline Button makeButtonsWithReader(bool (*read)(uint8_t),
+                                    ButtonTimingConfig timing,
+                                    bool skipPinInit,
+                                    Button::TimeFn timeFn)
+{
+    return Button(BUTTON_PINS, read, timing, skipPinInit, timeFn);
+}
+
+/**
+ * @brief Explicit-pins factory with external fast reader and optional time source.
+ *
+ * @tparam N Number of buttons (deduced from pins).
+ * @param pins Reference to an array of length N with key IDs.
+ * @param read Reader: bool(uint8_t id) → pressed?
+ * @param timing Global debounce/press-duration configuration.
+ * @param skipPinInit If true, pinMode is not called for pins.
+ * @param timeFn Optional time source (ms). nullptr → use millis().
+ * @return A ButtonHandler<N>.
+ */
+template <size_t N>
+inline ButtonHandler<N> makeButtonsWithPinsAndReader(const uint8_t (&pins)[N],
+                                                     bool (*read)(uint8_t),
+                                                     ButtonTimingConfig timing,
+                                                     bool skipPinInit,
+                                                     typename ButtonHandler<N>::TimeFn timeFn)
+{
+    return ButtonHandler<N>(pins, read, timing, skipPinInit, timeFn);
+}
+
+/**
+ * @brief Config-driven factory with context-aware reader and optional time source.
+ *
+ * @param read Reader: bool(void* ctx, uint8_t id) → pressed?
+ * @param ctx Opaque pointer passed back to read on each call.
+ * @param timing Global debounce/press-duration configuration.
+ * @param skipPinInit If true, pinMode is not called for BUTTON_PINS.
+ * @param timeFn Optional time source (ms). nullptr → use millis().
+ * @return A Button sized by NUM_BUTTONS.
+ */
+inline Button makeButtonsWithReaderCtx(bool (*read)(void *, uint8_t), void *ctx,
+                                       ButtonTimingConfig timing,
+                                       bool skipPinInit,
+                                       Button::TimeFn timeFn)
+{
+    return Button(BUTTON_PINS, read, ctx, timing, skipPinInit, timeFn);
+}
+
+/**
+ * @brief Explicit-pins factory with context-aware reader and optional time source.
+ *
+ * @tparam N Number of buttons (deduced from pins).
+ * @param pins Reference to an array of length N with key IDs.
+ * @param read Reader: bool(void* ctx, uint8_t id) → pressed?
+ * @param ctx Opaque pointer passed back to read on each call.
+ * @param timing Global debounce/press-duration configuration.
+ * @param skipPinInit If true, pinMode is not called for pins.
+ * @param timeFn Optional time source (ms). nullptr → use millis().
+ * @return A ButtonHandler<N>.
+ */
+template <size_t N>
+inline ButtonHandler<N> makeButtonsWithPinsAndReaderCtx(const uint8_t (&pins)[N],
+                                                        bool (*read)(void *, uint8_t), void *ctx,
+                                                        ButtonTimingConfig timing,
+                                                        bool skipPinInit,
+                                                        typename ButtonHandler<N>::TimeFn timeFn)
+{
+    return ButtonHandler<N>(pins, read, ctx, timing, skipPinInit, timeFn);
 }

@@ -4,6 +4,17 @@
  * @brief Generic multi-button handler with debounce and press duration detection.
  *
  * @file ButtonHandler.h
+ * @author Little Man Builds (Darren Osborne)
+ * @date 2025-08-05
+ * @copyright © 2025 Little Man Builds
+ */
+
+/**
+ * MIT License
+ *
+ * @brief Generic multi-button handler with debounce and press duration detection.
+ *
+ * @file ButtonHandler.h
  * @author Little Man Builds
  * @date 2025-08-05
  */
@@ -37,7 +48,6 @@ public:
 
     /**
      * @brief Function pointer that reads a single button by pin/key.
-     *
      * @param id Logical key/pin for the button.
      * @return true if the button is currently pressed (active).
      */
@@ -45,32 +55,33 @@ public:
 
     /**
      * @brief Context-aware reader callback.
-     *
      * @param ctx Opaque user context pointer supplied at construction/setter.
      * @param id Logical key/pin for the button.
      * @return true if the button is currently pressed (active).
      */
     using ReadFn = bool (*)(void *ctx, uint8_t);
 
+    /**
+     * @brief Millisecond time source (injected). If unset, falls back to millis().
+     */
+    using TimeFn = uint32_t (*)();
+
     // ---- Constructors ---- //
 
     /**
      * @brief Construct a Button handler using native GPIO reads.
-     *
-     * Initializes pins to INPUT_PULLUP by default and uses
-     * digitalRead(pin) == LOW as "pressed" (active-low).
-     *
      * @param buttonPins  Reference to an array of length N with pin IDs.
      * @param timing      Global debounce/press-duration configuration.
-     * @param skipPinInit If true, GPIO mode is not configured here.
-     *                    Set to true when pins are configured elsewhere.
+     * @param skipPinInit If true, GPIO mode is not configured here. Set to true when pins are configured elsewhere.
+     * @param timeFn      Optional time source (ms). If nullptr, uses millis().
      */
     ButtonHandler(const uint8_t (&buttonPins)[N],
                   ButtonTimingConfig timing = {},
-                  bool skipPinInit = false) noexcept
-        : timing_{timing}
+                  bool skipPinInit = false,
+                  TimeFn timeFn = nullptr) noexcept
+        : timing_{timing}, time_fn_{timeFn}
     {
-        const uint32_t t0 = millis();
+        const uint32_t t0 = time_now();
         for (size_t i = 0; i < N; ++i)
         {
             pins_[i] = buttonPins[i];
@@ -91,22 +102,20 @@ public:
 
     /**
      * @brief Construct with a per-pin fast reader function.
-     *
-     * Use this overload to provide a light-weight function pointer that
-     * returns the pressed state for a given key/pin.
-     *
      * @param buttonPins Reference to an array of length N with pin IDs.
      * @param readPin Fast reader: bool(uint8_t id) returns pressed.
      * @param timing Global debounce/press-duration configuration.
      * @param skipPinInit If false, pins are set to INPUT_PULLUP here.
+     * @param timeFn Optional time source (ms). If nullptr, uses millis().
      */
     ButtonHandler(const uint8_t (&buttonPins)[N],
                   ReadPinFn readPin,
                   ButtonTimingConfig timing = {},
-                  bool skipPinInit = true) noexcept
-        : timing_{timing}, read_pin_fn_{readPin}
+                  bool skipPinInit = true,
+                  TimeFn timeFn = nullptr) noexcept
+        : timing_{timing}, read_pin_fn_{readPin}, time_fn_{timeFn}
     {
-        const uint32_t t0 = millis();
+        const uint32_t t0 = time_now();
         for (size_t i = 0; i < N; ++i)
         {
             pins_[i] = buttonPins[i];
@@ -130,23 +139,21 @@ public:
 
     /**
      * @brief Construct with a context-aware reader callback.
-     *
-     * Use this when button states come from an external device (e.g., port
-     * expander) or another subsystem that needs ctx.
-     *
      * @param buttonPins Reference to an array of length N with key IDs.
      * @param readCb Reader callback: bool(void* ctx, uint8_t id).
      * @param ctx Opaque pointer provided back to readCb on each read.
      * @param timing Global debounce/press-duration configuration.
      * @param skipPinInit If false, pins are set to INPUT_PULLUP here.
+     * @param timeFn Optional time source (ms). If nullptr, uses millis().
      */
     ButtonHandler(const uint8_t (&buttonPins)[N],
                   ReadFn readCb, void *ctx,
                   ButtonTimingConfig timing = {},
-                  bool skipPinInit = true) noexcept
-        : timing_{timing}, read_fn_{readCb}, read_ctx_{ctx}
+                  bool skipPinInit = true,
+                  TimeFn timeFn = nullptr) noexcept
+        : timing_{timing}, read_fn_{readCb}, read_ctx_{ctx}, time_fn_{timeFn}
     {
-        const uint32_t t0 = millis();
+        const uint32_t t0 = time_now();
         for (size_t i = 0; i < N; ++i)
         {
             pins_[i] = buttonPins[i];
@@ -166,15 +173,11 @@ public:
 
     /**
      * @brief Scan and process button states using current millis().
-     *
-     * Debounces edges, updates committed states, and classifies completed
-     * presses into Short or Long events based on configured thresholds.
      */
-    void update() noexcept override { update(millis()); }
+    void update() noexcept override { update(time_now()); }
 
     /**
      * @brief Scan and process button states using a provided timestamp.
-     *
      * @param now Millisecond timestamp to use (e.g., from xTaskGetTickCount in RTOS).
      */
     void update(uint32_t now) noexcept override
@@ -272,14 +275,10 @@ public:
 
     /**
      * @brief Clear all pending events and re-initialize debounced state.
-     *
-     * Sets every button to "not pressed", clears the pending event flags,
-     * and re-bases timestamps using millis(). Per-button and global
-     * configuration (timings, polarity, enabled) are left unchanged.
      */
     void reset() noexcept override
     {
-        const uint32_t t0 = millis();
+        const uint32_t t0 = time_now();
         for (size_t i = 0; i < N; ++i)
         {
             last_state_[i] = false;      ///< Committed (debounced).
@@ -318,8 +317,7 @@ public:
     }
 
     /**
-     * @brief Enum-friendly wrapper for querying the exact duration (ms) of the
-     *        last completed press.
+     * @brief Enum-friendly wrapper for querying the exact duration (ms) of the last completed press.
      * @tparam E Enum type (must satisfy std::is_enum<E>::value).
      * @param buttonId Enumerated button identifier.
      * @return Milliseconds of the most recent *completed* press for buttonId.
@@ -387,6 +385,12 @@ public:
     }
 
     /**
+     * @brief Set/override the millisecond time source.
+     * @param tf Time function returning milliseconds.
+     */
+    void setTimeFn(TimeFn tf) noexcept { time_fn_ = tf; }
+
+    /**
      * @brief Compile-time button count as a utility for templates/static contexts.
      */
     static constexpr uint8_t sizeStatic() noexcept { return static_cast<uint8_t>(N); }
@@ -398,7 +402,6 @@ public:
 
     /**
      * @brief Build a 32-bit pressed mask (bit i == 1 iff button i is pressed).
-     *
      * @return Bitmask of currently pressed buttons. Requires N <= 32.
      */
     [[nodiscard]] uint32_t pressedMask() const noexcept override
@@ -413,7 +416,6 @@ public:
 
     /**
      * @brief Write the current debounced state into a bitset (bit i == pressed).
-     *
      * @tparam M Size of the destination bitset; if M < N, extra buttons are ignored.
      * @param out Destination bitset receiving the current debounced states.
      */
@@ -427,7 +429,6 @@ public:
 
     /**
      * @brief Apply a functor to each button ID and its debounced state.
-     *
      * @tparam F Callable type: void(uint8_t id, bool pressed).
      * @param f  Functor/lambda invoked for each button.
      */
@@ -452,4 +453,16 @@ private:
     ReadPinFn read_pin_fn_{nullptr}; ///< Optional fast-path reader (per-pin).
     ReadFn read_fn_{nullptr};        ///< Optional context-aware reader.
     void *read_ctx_{nullptr};        ///< Opaque context for @c read_fn_.
+
+    // ---- Time source ---- //
+
+    TimeFn time_fn_{nullptr};
+
+    /**
+     * @brief Resolve the current time in ms. Uses injected TimeFn when provided, otherwise Arduino millis().
+     */
+    inline uint32_t time_now() const noexcept
+    {
+        return time_fn_ ? time_fn_() : millis();
+    }
 };

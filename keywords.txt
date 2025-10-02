@@ -9,6 +9,7 @@ ButtonPerConfig	KEYWORD1
 ButtonPins	KEYWORD1
 ButtonIndex	KEYWORD1
 Button	KEYWORD1
+TimeFn	KEYWORD1
 
 #######################################
 # Methods and Functions (KEYWORD2)
@@ -39,6 +40,7 @@ setReadFn	KEYWORD2
 setTiming	KEYWORD2
 setPerConfig	KEYWORD2
 enable	KEYWORD2
+setTimeFn	KEYWORD2
 
 # Utils (device-agnostic)
 indexFromKey	KEYWORD2

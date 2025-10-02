@@ -4,8 +4,9 @@
  * @brief Common button types (events and timing/config structs).
  *
  * @file ButtonTypes.h
- * @author Little Man Builds
+ * @author Little Man Builds (Darren Osborne)
  * @date 2025-08-30
+ * @copyright © 2025 Little Man Builds
  */
 
 #pragma once

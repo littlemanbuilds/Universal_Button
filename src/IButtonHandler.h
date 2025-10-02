@@ -4,9 +4,9 @@
  * @brief Abstract base class for button event handling.
  *
  * @file IButtonHandler.h
- * @author Little Man Builds
+ * @author Little Man Builds (Darren Osborne)
  * @date 2025-08-05
- * @copyright Copyright (c) 2025 Little Man Builds
+ * @copyright © 2025 Little Man Builds
  */
 
 #pragma once
