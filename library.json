@@ -1,6 +1,6 @@
 {
   "name": "Universal_Button",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "description": "Generic multi-button handler with debounce and short/long press events. Pluggable readers (GPIO/expanders), per-button config, enum overloads, helpers, and optional time source injection for Arduino-free/RTOS use.",
   "keywords": "button, debounce, short-press, long-press, event, input, gpio, mcp23017, expander, arduino, esp32, rtos, freertos, time, millis, timefn",
   "license": "MIT",
