@@ -20,7 +20,8 @@ enum class ButtonPressType : uint8_t
 {
     None,  ///< No event.
     Short, ///< Short press event.
-    Long   ///< Long press event.
+    Long,  ///< Long press event.
+    Double ///< Two short presses within a configured gap.
 };
 
 /**
@@ -28,15 +29,16 @@ enum class ButtonPressType : uint8_t
  */
 struct ButtonTimingConfig
 {
-    uint32_t debounce_ms;    ///< Minimum time to confirm a press/release.
-    uint32_t short_press_ms; ///< Minimum time for a short press.
-    uint32_t long_press_ms;  ///< Minimum time for a long press.
+    uint32_t debounce_ms;     ///< Minimum time to confirm a press/release.
+    uint32_t short_press_ms;  ///< Minimum time for a short press.
+    uint32_t long_press_ms;   ///< Minimum time for a long press.
+    uint32_t double_click_ms; ///< Max gap between two short presses to count as a double.
 
-    constexpr ButtonTimingConfig(
-        uint32_t debounce = 30,
-        uint32_t short_press = 200,
-        uint32_t long_press = 1000)
-        : debounce_ms(debounce), short_press_ms(short_press), long_press_ms(long_press) {}
+    constexpr ButtonTimingConfig(uint32_t debounce = 30,
+                                 uint32_t short_press = 200,
+                                 uint32_t long_press = 1000,
+                                 uint32_t double_click = 400)
+        : debounce_ms(debounce), short_press_ms(short_press), long_press_ms(long_press), double_click_ms(double_click) {}
 };
 
 /**
@@ -45,9 +47,10 @@ struct ButtonTimingConfig
  */
 struct ButtonPerConfig
 {
-    uint16_t debounce_ms{0};    ///< 0 => use global timing_.debounce_ms
-    uint16_t short_press_ms{0}; ///< 0 => use global timing_.short_press_ms
-    uint16_t long_press_ms{0};  ///< 0 => use global timing_.long_press_ms
-    bool active_low{true};      ///< true = LOW means pressed (default pull-up wiring)
-    bool enabled{true};         ///< false = ignore this button in update()
+    uint16_t debounce_ms{0};     ///< 0 => use global timing_.debounce_ms.
+    uint16_t short_press_ms{0};  ///< 0 => use global timing_.short_press_ms.
+    uint16_t long_press_ms{0};   ///< 0 => use global timing_.long_press_ms.
+    uint16_t double_click_ms{0}; ///< 0 => use global timing_.double_click_ms.
+    bool active_low{true};       ///< true = LOW means pressed (default pull-up wiring).
+    bool enabled{true};          ///< false = ignore this button in update().
 };

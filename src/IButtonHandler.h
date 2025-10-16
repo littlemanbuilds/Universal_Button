@@ -46,7 +46,7 @@ public:
     /**
      * @brief Get and consume press event for a button.
      * @param buttonId Index of button.
-     * @return ButtonPressType Event type: Short, Long, or None.
+     * @return ButtonPressType Event type: Short, Long, Double, or None.
      */
     virtual ButtonPressType getPressType(uint8_t buttonId) noexcept = 0;
 
@@ -72,8 +72,7 @@ public:
     [[nodiscard]] virtual uint32_t pressedMask() const noexcept
     {
         uint32_t m = 0;
-        const uint8_t n = size() > 32 ? 32 : size();
-        for (uint8_t i = 0; i < n; ++i)
+        for (uint8_t i = 0; i < size() && i < 32; ++i)
             if (isPressed(i))
                 m |= (1u << i);
         return m;

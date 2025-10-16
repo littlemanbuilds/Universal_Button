@@ -38,8 +38,10 @@ sizeStatic	KEYWORD2
 setReadPinFn	KEYWORD2
 setReadFn	KEYWORD2
 setTiming	KEYWORD2
+setGlobalTiming	KEYWORD2
 setPerConfig	KEYWORD2
 enable	KEYWORD2
+setActiveLow	KEYWORD2
 setTimeFn	KEYWORD2
 
 # Utils (device-agnostic)
