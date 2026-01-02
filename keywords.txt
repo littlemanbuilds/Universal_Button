@@ -10,6 +10,8 @@ ButtonPins	KEYWORD1
 ButtonIndex	KEYWORD1
 Button	KEYWORD1
 TimeFn	KEYWORD1
+LatchMode	KEYWORD1
+LatchTrigger	KEYWORD1
 
 #######################################
 # Methods and Functions (KEYWORD2)
@@ -43,6 +45,12 @@ setPerConfig	KEYWORD2
 enable	KEYWORD2
 setActiveLow	KEYWORD2
 setTimeFn	KEYWORD2
+isLatched	KEYWORD2
+latchedMask	KEYWORD2
+getAndClearLatchedChanged	KEYWORD2
+setLatched	KEYWORD2
+clearAllLatched	KEYWORD2
+clearLatchedMask	KEYWORD2
 
 # Utils (device-agnostic)
 indexFromKey	KEYWORD2

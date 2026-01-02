@@ -6,7 +6,7 @@
  * @file ButtonTypes.h
  * @author Little Man Builds (Darren Osborne)
  * @date 2025-08-30
- * @copyright © 2025 Little Man Builds
+ * @copyright Copyright © 2025 Little Man Builds
  */
 
 #pragma once
@@ -22,6 +22,26 @@ enum class ButtonPressType : uint8_t
     Short, ///< Short press event.
     Long,  ///< Long press event.
     Double ///< Two short presses within a configured gap.
+};
+
+/**
+ * @brief Latching behavior applied when a configured trigger event occurs.
+ */
+enum class LatchMode : uint8_t
+{
+    Toggle, ///< Flip latched state (OFF ↔ ON).
+    Set,    ///< Force latched state ON.
+    Reset   ///< Force latched state OFF.
+};
+
+/**
+ * @brief Which press event should drive latching.
+ */
+enum class LatchTrigger : uint8_t
+{
+    Short, ///< Trigger latching on ButtonPressType::Short.
+    Long,  ///< Trigger latching on ButtonPressType::Long.
+    Double ///< Trigger latching on ButtonPressType::Double.
 };
 
 /**
@@ -53,4 +73,10 @@ struct ButtonPerConfig
     uint16_t double_click_ms{0}; ///< 0 => use global timing_.double_click_ms.
     bool active_low{true};       ///< true = LOW means pressed (default pull-up wiring).
     bool enabled{true};          ///< false = ignore this button in update().
+
+    // Latching.
+    bool latch_enabled{false};                  ///< true = maintain a latched state for this button.
+    LatchMode latch_mode{LatchMode::Toggle};    ///< Toggle / Set / Reset behavior when triggered.
+    LatchTrigger latch_on{LatchTrigger::Short}; ///< Which press event drives latching for this button.
+    bool latch_initial{false};                  ///< Initial latched state applied on construction and reset().
 };

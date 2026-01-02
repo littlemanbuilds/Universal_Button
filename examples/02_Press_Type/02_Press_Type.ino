@@ -1,11 +1,12 @@
 /**
  * @file 02_Press_Type.ino
+ *
  * @brief Press-type events (short/long/double) with custom debounce/thresholds.
  */
 
 // Explicit button mapping (compile-time). MUST be BEFORE <Universal_Button> header include.
 #define BUTTON_LIST(X) \
-    X(TestButton, 7) ///< INPUT_PULLUP (pressed == LOW).
+    X(TestButton, 6) ///< TestButton == GPIO6. INPUT_PULLUP (pressed == LOW).
 
 #include <Arduino.h>
 #include <Universal_Button.h>

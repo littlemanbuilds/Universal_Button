@@ -8,7 +8,7 @@
  * @file Universal_Button_Utils.h
  * @author Little Man Builds (Darren Osborne)
  * @date 2025-08-30
- * @copyright © 2025 Little Man Builds
+ * @copyright Copyright © 2025 Little Man Builds
  */
 
 #pragma once

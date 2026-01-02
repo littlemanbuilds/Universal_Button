@@ -6,7 +6,7 @@
  * @file IButtonHandler.h
  * @author Little Man Builds (Darren Osborne)
  * @date 2025-08-05
- * @copyright © 2025 Little Man Builds
+ * @copyright Copyright © 2025 Little Man Builds
  */
 
 #pragma once
@@ -14,6 +14,7 @@
 #include <ButtonTypes.h>
 #include <cstdint>
 #include <bitset>
+#include <type_traits>
 
 /**
  * @brief Abstract interface for button event handlers.
@@ -86,9 +87,86 @@ public:
     template <size_t N>
     void snapshot(std::bitset<N> &out) const noexcept
     {
+        out.reset();
         const uint8_t n = static_cast<uint8_t>(N < size() ? N : size());
         for (uint8_t i = 0; i < n; ++i)
             out.set(i, isPressed(i));
-        // Any remaining bits (if N > size()) stay default-initialized (false).
     }
+
+    // ---- Enum-friendly overloads (no cast needed in call sites) ---- //
+
+    template <typename E, typename std::enable_if<std::is_enum<E>::value, int>::type = 0>
+    [[nodiscard]] bool isPressed(E buttonId) const noexcept
+    {
+        return isPressed(static_cast<uint8_t>(buttonId));
+    }
+
+    template <typename E, typename std::enable_if<std::is_enum<E>::value, int>::type = 0>
+    ButtonPressType getPressType(E buttonId) noexcept
+    {
+        return getPressType(static_cast<uint8_t>(buttonId));
+    }
+
+    template <typename E, typename std::enable_if<std::is_enum<E>::value, int>::type = 0>
+    [[nodiscard]] uint32_t getLastPressDuration(E buttonId) const noexcept
+    {
+        return getLastPressDuration(static_cast<uint8_t>(buttonId));
+    }
+
+    template <typename E, typename std::enable_if<std::is_enum<E>::value, int>::type = 0>
+    [[nodiscard]] bool isLatched(E buttonId) const noexcept
+    {
+        return isLatched(static_cast<uint8_t>(buttonId));
+    }
+
+    template <typename E, typename std::enable_if<std::is_enum<E>::value, int>::type = 0>
+    bool getAndClearLatchedChanged(E buttonId) noexcept
+    {
+        return getAndClearLatchedChanged(static_cast<uint8_t>(buttonId));
+    }
+
+    /**
+     * @brief Query the current latched state of a button.
+     * @param buttonId Index of button.
+     * @return True if latched ON; false otherwise.
+     */
+    [[nodiscard]] virtual bool isLatched(uint8_t /*buttonId*/) const noexcept { return false; }
+
+    /**
+     * @brief Force the latched state for a button.
+     * @param b  Button index.
+     * @param on Desired latched state (true = ON, false = OFF).
+     */
+    virtual void setLatched(uint8_t /*b*/, bool /*on*/) noexcept {}
+
+    /**
+     * @brief Clear all latched states.
+     */
+    virtual void clearAllLatched() noexcept {}
+
+    /**
+     * @brief Clear a subset of latched states using a bitmask.
+     * @param mask Bitmask of button indices to clear (bit0 = button 0, etc.).
+     */
+    virtual void clearLatchedMask(uint32_t /*mask*/) noexcept {}
+
+    /**
+     * @brief Build a 32-bit latched mask.
+     * @return Bitmask where bit i is set when button i is latched ON (up to 32 buttons).
+     */
+    [[nodiscard]] virtual uint32_t latchedMask() const noexcept
+    {
+        uint32_t m = 0;
+        for (uint8_t i = 0; i < size() && i < 32; ++i)
+            if (isLatched(i))
+                m |= (1u << i);
+        return m;
+    }
+
+    /**
+     * @brief Edge flag for latching: true if latched state changed since the last clear.
+     * @param buttonId Index of button.
+     * @return True if the latched state changed since the previous call.
+     */
+    virtual bool getAndClearLatchedChanged(uint8_t /*buttonId*/) noexcept { return false; }
 };

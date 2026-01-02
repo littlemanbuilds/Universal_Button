@@ -1,11 +1,15 @@
 {
   "name": "Universal_Button",
-  "version": "1.5.0",
-  "description": "Generic multi-button handler with debounce and short/long/double press events. Pluggable readers (GPIO/expanders), per-button overrides (timing/polarity/enable incl. double_click_ms), enum-friendly API, helpers, and optional time source injection for Arduino-free/RTOS use.",
-  "keywords": "button, debounce, short-press, long-press, double-click, double-press, event, input, gpio, mcp23017, expander, arduino, esp32, rtos, freertos, time, millis, timefn",
+  "version": "1.6.0",
+  "description": "Generic multi-button handler with debounce and short/long/double press events plus optional latching. Pluggable readers (GPIO/expanders), per-button overrides (timing/polarity/enable incl. double_click_ms + latch config), enum-friendly API, helpers, and optional time source injection for Arduino-free/RTOS use. Includes latch control APIs (setLatched/clearAllLatched/clearLatchedMask) for system-level policies like global reset.",
+  "keywords": "button, debounce, short-press, long-press, double-click, double-press, latch, latching, toggle, set, reset, event, input, gpio, mcp23017, expander, arduino, esp32, rtos, freertos, time, millis, timefn, latchedmask, setlatched, clearalllatched, clearlatchedmask, global-reset",
   "license": "MIT",
   "authors": [
-    { "name": "Little Man Builds", "email": "littlemanbuilds@gmail.com", "maintainer": true }
+    {
+      "name": "Little Man Builds",
+      "email": "littlemanbuilds@gmail.com",
+      "maintainer": true
+    }
   ],
   "homepage": "https://github.com/LittleManBuilds/Universal_Button",
   "repository": {
@@ -17,15 +21,14 @@
   "headers": ["Universal_Button.h"],
   "build": {
     "includeDir": "src",
-    "srcFilter": [
-      "+<src/>"
-    ]
+    "srcFilter": ["+<src/>"]
   },
   "examples": [
     "examples/01_Basic_Button/01_Basic_Button.ino",
     "examples/02_Press_Type/02_Press_Type.ino",
     "examples/03_Local_Enum/03_Local_Enum.ino",
     "examples/04_Port_Expander/04_Port_Expander.ino",
-    "examples/05_Cached_Read/05_Cached_Read.ino"
+    "examples/05_Cached_Read/05_Cached_Read.ino",
+    "examples/06_Latching/06_Latching.ino"
   ]
 }

@@ -7,9 +7,9 @@
 // Explicit button mapping (compile-time). MUST be BEFORE <Universal_Button> header include.
 // When using a port expander, ButtonTest numbers are irrelevant e.g. 60, 61, 62... as long as they're different.
 #define BUTTON_LIST(X) \
-    X(ButtonTest1, 7)  \
-    X(ButtonTest2, 8)  \
-    X(ButtonTest3, 9)
+    X(TestButton1, 6)  \
+    X(TestButton2, 7)  \
+    X(TestButton3, 8)
 
 #include <Arduino.h>
 #include <Universal_Button.h>
@@ -22,9 +22,9 @@ constexpr uint8_t MCP_ADDR = 0x20; ///< I2C address (A2..A0 = 000 -> 0x20). Adju
 
 // Map each logical button (by enum order) to MCP pin 0..15 (0..7=A, 8..15=B).
 constexpr uint8_t MCP_PINS[NUM_BUTTONS] = {
-    0, ///< ButtonTest1 -> GPA0.
-    1, ///< ButtonTest2 -> GPA1.
-    8  ///< ButtonTest3 -> GPB0.
+    0, ///< TestButton1 -> GPA0.
+    1, ///< TestButton2 -> GPA1.
+    8  ///< TestButton3 -> GPB0.
 };
 static_assert(NUM_BUTTONS == (sizeof(MCP_PINS) / sizeof(MCP_PINS[0])),
               "MCP_PINS size must match NUM_BUTTONS");
@@ -78,24 +78,24 @@ void loop()
     btns.update();
 
     // Read/consume events for each button.
-    const ButtonPressType btn1 = btns.getPressType(ButtonIndex::ButtonTest1);
-    const ButtonPressType btn2 = btns.getPressType(ButtonIndex::ButtonTest2);
-    const ButtonPressType btn3 = btns.getPressType(ButtonIndex::ButtonTest3);
+    const ButtonPressType btn1 = btns.getPressType(ButtonIndex::TestButton1);
+    const ButtonPressType btn2 = btns.getPressType(ButtonIndex::TestButton2);
+    const ButtonPressType btn3 = btns.getPressType(ButtonIndex::TestButton3);
 
     if (btn1 == ButtonPressType::Short)
-        Serial.println("ButtonTest1: Short press...");
+        Serial.println("TestButton1: Short press...");
     else if (btn1 == ButtonPressType::Long)
-        Serial.println("ButtonTest1: Long press...");
+        Serial.println("TestButton1: Long press...");
 
     if (btn2 == ButtonPressType::Short)
-        Serial.println("ButtonTest2: Short press...");
+        Serial.println("TestButton2: Short press...");
     else if (btn2 == ButtonPressType::Long)
-        Serial.println("ButtonTest2: Long press...");
+        Serial.println("TestButton2: Long press...");
 
     if (btn3 == ButtonPressType::Short)
-        Serial.println("ButtonTest3: Short press...");
+        Serial.println("TestButton3: Short press...");
     else if (btn3 == ButtonPressType::Long)
-        Serial.println("ButtonTest3: Long press...");
+        Serial.println("TestButton3: Long press...");
 
     delay(10);
 }

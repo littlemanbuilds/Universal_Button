@@ -6,7 +6,7 @@
  * @file ButtonHandler.h
  * @author Little Man Builds (Darren Osborne)
  * @date 2025-08-05
- * @copyright © 2025 Little Man Builds
+ * @copyright Copyright © 2025 Little Man Builds
  */
 
 #pragma once
@@ -88,6 +88,8 @@ public:
             last_duration_[i] = 0;
             pending_short_[i] = false;
             pending_since_[i] = 0;
+            latched_.set(i, per_[i].latch_initial);
+            latched_changed_.set(i, false);
         }
     }
 
@@ -121,6 +123,8 @@ public:
             last_duration_[i] = 0;
             pending_short_[i] = false;
             pending_since_[i] = 0;
+            latched_.set(i, per_[i].latch_initial);
+            latched_changed_.set(i, false);
         }
     }
 
@@ -155,6 +159,8 @@ public:
             last_duration_[i] = 0;
             pending_short_[i] = false;
             pending_since_[i] = 0;
+            latched_.set(i, per_[i].latch_initial);
+            latched_changed_.set(i, false);
         }
     }
 
@@ -207,7 +213,12 @@ public:
     void setPerConfig(uint8_t id, const ButtonPerConfig &c) noexcept
     {
         if (id < N)
+        {
             per_[id] = c;
+
+            // Latched state is preserved when updating per-config at runtime.
+            // latch_initial is only applied on reset() (and at construction).
+        }
     }
 
     /**
@@ -219,7 +230,13 @@ public:
     void enable(uint8_t id, bool en) noexcept
     {
         if (id < N)
+        {
             per_[id].enabled = en;
+            if (!en)
+            {
+                resetButton_(static_cast<size_t>(id), time_now());
+            }
+        }
     }
 
     /**
@@ -304,17 +321,6 @@ public:
             const uint32_t lms = per_[i].long_press_ms ? static_cast<uint32_t>(per_[i].long_press_ms) : timing_.long_press_ms;
             const uint32_t dcms = per_[i].double_click_ms ? static_cast<uint32_t>(per_[i].double_click_ms) : timing_.double_click_ms;
 
-            // Flush pending single if window elapsed and no event queued yet.
-            if (pending_short_[i] && event_[i] == ButtonPressType::None)
-            {
-                const uint32_t dt = now - pending_since_[i];
-                if (dt >= dcms)
-                {
-                    event_[i] = ButtonPressType::Short;
-                    pending_short_[i] = false;
-                }
-            }
-
             // Read raw physical level: prefer fast per-pin fn, else ctx-callback, else native.
             const bool pressed_default =
                 (read_pin_fn_) ? read_pin_fn_(pins_[i])
@@ -347,7 +353,12 @@ public:
                     last_duration_[i] = duration; ///< Record exact duration for retrieval.
 
                     if (duration >= lms)
+                    {
                         event_[i] = ButtonPressType::Long;
+
+                        // Finalized event => apply latch now (if configured).
+                        applyLatch_(i, event_[i]);
+                    }
                     else if (duration >= sms)
                     {
                         // Short press: either completes a double or starts a pending single.
@@ -355,18 +366,40 @@ public:
                         {
                             event_[i] = ButtonPressType::Double;
                             pending_short_[i] = false;
+
+                            // Finalized event => apply latch now (if configured).
+                            applyLatch_(i, event_[i]);
                         }
                         else
                         {
                             // Defer emitting Short; it will fire if no 2nd press arrives within dcms.
                             pending_short_[i] = true;
                             pending_since_[i] = now;
+                            // No finalized event yet => do not apply latch here.
                         }
                     }
                     else
+                    {
                         event_[i] = ButtonPressType::None;
+                    }
 
                     press_start_[i] = 0;
+                }
+            }
+
+            // Flush pending single-click ONLY when both raw and debounced state are released.
+            // This prevents a "pending Short" from firing while a second press is already in progress
+            // but still inside the debounce window.
+            if (pending_short_[i] && event_[i] == ButtonPressType::None)
+            {
+                const uint32_t dt = now - pending_since_[i];
+                if (!last_state_[i] && !last_state_read_[i] && (dt >= dcms))
+                {
+                    event_[i] = ButtonPressType::Short;
+                    pending_short_[i] = false;
+
+                    // Finalized event => apply latch now (if configured).
+                    applyLatch_(i, event_[i]);
                 }
             }
         }
@@ -408,6 +441,108 @@ public:
     }
 
     /**
+     * @brief Query the current latched state for a button.
+     * @param buttonId Index of button.
+     * @return true if latched ON; false otherwise.
+     */
+    [[nodiscard]] bool isLatched(uint8_t buttonId) const noexcept override
+    {
+        return (buttonId < N) ? latched_.test(buttonId) : false;
+    }
+
+    /**
+     * @brief Force the latched state for a button.
+     * @param id Button index [0..N-1].
+     * @param on Desired latched state (true = ON, false = OFF).
+     */
+    void setLatched(uint8_t id, bool on) noexcept override
+    {
+        if (id >= N)
+            return;
+
+        const bool was = latched_.test(id);
+        if (was == on)
+            return;
+
+        latched_.set(id, on);
+        latched_changed_.set(id, true);
+    }
+
+    /**
+     * @brief Force the latched state for a button (enum-friendly overload).
+     * @tparam E Any enum type convertible to a button index.
+     * @param b Button index enum value (e.g., ButtonIndex or a local enum class).
+     * @param on Desired latched state (true = ON, false = OFF).
+     */
+    template <typename E,
+              typename std::enable_if<std::is_enum<E>::value, int>::type = 0>
+    void setLatched(E b, bool on) noexcept
+    {
+        setLatched(static_cast<uint8_t>(b), on);
+    }
+
+    /**
+     * @brief Clear all latched states.
+     */
+    void clearAllLatched() noexcept
+    {
+        for (size_t i = 0; i < N; ++i)
+        {
+            if (latched_.test(i))
+            {
+                latched_.set(i, false);
+                latched_changed_.set(i, true);
+            }
+        }
+    }
+
+    /**
+     * @brief Clear a subset of latched states using a bitmask.
+     * @param mask Bitmask of button indices to clear (bit0 = button 0, etc.).
+     */
+    void clearLatchedMask(uint32_t mask) noexcept
+    {
+        for (size_t i = 0; i < N && i < 32; ++i)
+        {
+            if ((mask & (1u << i)) != 0u && latched_.test(i))
+            {
+                latched_.set(i, false);
+                latched_changed_.set(i, true);
+            }
+        }
+    }
+
+    /**
+     * @brief Build a 32-bit latched mask.
+     * @return Bitmask where bit i is set when button i is latched ON (up to 32 buttons).
+     */
+    [[nodiscard]] uint32_t latchedMask() const noexcept override
+    {
+        uint32_t m = 0U;
+        const uint8_t n = static_cast<uint8_t>((N < 32) ? N : 32);
+        for (uint8_t i = 0; i < n; ++i)
+        {
+            if (latched_.test(i))
+                m |= (1u << i);
+        }
+        return m;
+    }
+
+    /**
+     * @brief Edge flag for latching: true if latched state changed since the last clear.
+     * @param buttonId Index of button.
+     * @return true if the latched state changed since the previous call (and clears the flag).
+     */
+    bool getAndClearLatchedChanged(uint8_t buttonId) noexcept override
+    {
+        if (buttonId >= N)
+            return false;
+        const bool v = latched_changed_.test(buttonId);
+        latched_changed_.set(buttonId, false);
+        return v;
+    }
+
+    /**
      * @brief Clear all pending events and re-initialize debounced state.
      */
     void reset() noexcept override
@@ -423,6 +558,8 @@ public:
             last_duration_[i] = 0;
             pending_short_[i] = false;
             pending_since_[i] = 0;
+            latched_.set(i, per_[i].latch_initial);
+            latched_changed_.set(i, false);
         }
     }
 
@@ -465,20 +602,46 @@ public:
         return getLastPressDuration(static_cast<uint8_t>(buttonId));
     }
 
+    /**
+     * @brief Enum-friendly overload of isLatched().
+     * @tparam E Enum type (must satisfy std::is_enum<E>::value).
+     * @param buttonId Enumerated button identifier.
+     * @return true if latched ON; false otherwise.
+     */
+    template <typename E, typename std::enable_if<std::is_enum<E>::value, int>::type = 0>
+    [[nodiscard]] bool isLatched(E buttonId) const noexcept
+    {
+        return isLatched(static_cast<uint8_t>(buttonId));
+    }
+
+    /**
+     * @brief Enum-friendly overload of getAndClearLatchedChanged().
+     * @tparam E Enum type (must satisfy std::is_enum<E>::value).
+     * @param buttonId Enumerated button identifier.
+     * @return true if the latched state changed since the previous call (and clears the flag).
+     */
+    template <typename E, typename std::enable_if<std::is_enum<E>::value, int>::type = 0>
+    bool getAndClearLatchedChanged(E buttonId) noexcept
+    {
+        return getAndClearLatchedChanged(static_cast<uint8_t>(buttonId));
+    }
+
 private:
     // ---- Storage ---- //
 
-    uint8_t pins_[N]{};             ///< Pin or logical IDs.
-    bool last_state_[N];            ///< Last committed (debounced) state.
-    bool last_state_read_[N]{};     ///< Most recent raw state (after polarity).
-    uint32_t last_state_change_[N]; ///< Timestamp (ms) when raw state last changed.
-    uint32_t press_start_[N];       ///< Timestamp (ms) when press started (committed).
-    ButtonPressType event_[N];      ///< Pending event (short/long/double) per button.
-    bool pending_short_[N]{};       ///< Pending single waiting for possible double.
-    uint32_t pending_since_[N]{};   ///< Timestamp (ms) of first short release.
-    ButtonPerConfig per_[N];        ///< Per-button overrides (timing, polarity, enable).
-    ButtonTimingConfig timing_;     ///< Global debounce and press-duration configuration.
-    uint32_t last_duration_[N];     ///< Last measured press duration (ms), set on release.
+    uint8_t pins_[N]{};                ///< Pin or logical IDs.
+    bool last_state_[N];               ///< Last committed (debounced) state.
+    bool last_state_read_[N]{};        ///< Most recent raw state (after polarity).
+    uint32_t last_state_change_[N];    ///< Timestamp (ms) when raw state last changed.
+    uint32_t press_start_[N];          ///< Timestamp (ms) when press started (committed).
+    ButtonPressType event_[N];         ///< Pending event (short/long/double) per button.
+    bool pending_short_[N]{};          ///< Pending single waiting for possible double.
+    uint32_t pending_since_[N]{};      ///< Timestamp (ms) of first short release.
+    ButtonPerConfig per_[N];           ///< Per-button overrides (timing, polarity, enable).
+    ButtonTimingConfig timing_;        ///< Global debounce and press-duration configuration.
+    uint32_t last_duration_[N];        ///< Last measured press duration (ms), set on release.
+    std::bitset<N> latched_{};         ///< Latched state per button.
+    std::bitset<N> latched_changed_{}; ///< Edge flag: latched state changed since last clear.
 
     // ---- Readers ---- //
 
@@ -496,5 +659,86 @@ private:
     inline uint32_t time_now() const noexcept
     {
         return time_fn_ ? time_fn_() : millis();
+    }
+
+    /**
+     * @brief Reset all runtime state for a single button index.
+     * @param i Button index.
+     * @param now Current time (ms).
+     * @note Used when disabling buttons to avoid "stuck" states/events.
+     */
+    inline void resetButton_(size_t i, uint32_t now) noexcept
+    {
+        last_state_[i] = false;
+        last_state_read_[i] = false;
+        last_state_change_[i] = now;
+        press_start_[i] = 0U;
+        event_[i] = ButtonPressType::None;
+        pending_short_[i] = false;
+        pending_since_[i] = 0U;
+        last_duration_[i] = 0U;
+
+        // Clear latching state as well (disabled buttons should not report latch changes).
+        latched_.set(i, false);
+        latched_changed_.set(i, false);
+    }
+
+    /**
+     * @brief Check if a press event matches the configured latch trigger.
+     * @param trig Latch trigger selection.
+     * @param evt Finalized press event.
+     * @return true if evt should drive latching.
+     */
+    static inline bool latchMatches_(LatchTrigger trig, ButtonPressType evt) noexcept
+    {
+        switch (trig)
+        {
+        case LatchTrigger::Short:
+            return evt == ButtonPressType::Short;
+        case LatchTrigger::Long:
+            return evt == ButtonPressType::Long;
+        case LatchTrigger::Double:
+            return evt == ButtonPressType::Double;
+        default:
+            return false;
+        }
+    }
+
+    /**
+     * @brief Apply latch behavior for a finalized press event.
+     * @param i Button index.
+     * @param evt Finalized press event (Short/Long/Double).
+     */
+    inline void applyLatch_(size_t i, ButtonPressType evt) noexcept
+    {
+        if (!per_[i].latch_enabled)
+            return;
+
+        if (!latchMatches_(per_[i].latch_on, evt))
+            return;
+
+        const bool before = latched_.test(i);
+        bool after = before;
+
+        switch (per_[i].latch_mode)
+        {
+        case LatchMode::Toggle:
+            after = !before;
+            break;
+        case LatchMode::Set:
+            after = true;
+            break;
+        case LatchMode::Reset:
+            after = false;
+            break;
+        default:
+            break;
+        }
+
+        if (after != before)
+        {
+            latched_.set(i, after);
+            latched_changed_.set(i, true);
+        }
     }
 };
