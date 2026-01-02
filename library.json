@@ -1,6 +1,6 @@
 {
   "name": "Universal_Button",
-  "version": "1.6.0",
+  "version": "1.6.1",
   "description": "Generic multi-button handler with debounce and short/long/double press events plus optional latching. Pluggable readers (GPIO/expanders), per-button overrides (timing/polarity/enable incl. double_click_ms + latch config), enum-friendly API, helpers, and optional time source injection for Arduino-free/RTOS use. Includes latch control APIs (setLatched/clearAllLatched/clearLatchedMask) for system-level policies like global reset.",
   "keywords": "button, debounce, short-press, long-press, double-click, double-press, latch, latching, toggle, set, reset, event, input, gpio, mcp23017, expander, arduino, esp32, rtos, freertos, time, millis, timefn, latchedmask, setlatched, clearalllatched, clearlatchedmask, global-reset",
   "license": "MIT",
