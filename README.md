@@ -33,6 +33,7 @@ It includes enum‑friendly helpers, per‑button overrides, **exact last‑pres
   - [Highlights](#highlights)
   - [Contents](#contents)
   - [Installation](#installation)
+  - [Supported Platforms](#supported-platforms)
   - [Concepts](#concepts)
   - [Configuration Mapping](#configuration-mapping)
   - [Quick Use (Easy Header)](#quick-use-easy-header)
@@ -52,6 +53,8 @@ It includes enum‑friendly helpers, per‑button overrides, **exact last‑pres
   - [Mixed Inputs (GPIO + Expander)](#mixed-inputs-gpio--expander)
   - [Performance Notes](#performance-notes)
   - [FAQ](#faq)
+  - [Compatibility Testing](#compatibility-testing)
+  - [Contributing / Issues](#contributing--issues)
   - [License](#license)
 
 ---
@@ -63,6 +66,23 @@ It includes enum‑friendly helpers, per‑button overrides, **exact last‑pres
 **PlatformIO:** Search libraries and add to `lib_deps` or install from ZIP.
 
 > The core library **does not** force an MCP dependency. Only examples that use MCP include it.
+
+---
+
+## Supported Platforms
+
+This library is continuously tested on the following platforms:
+
+- AVR (Uno, Nano, Mega-class boards)
+- megaAVR (Nano Every)
+- ESP32
+- ESP8266
+- RP2040 (Raspberry Pi Pico)
+- SAMD (MKR / Zero)
+- STM32 (Nucleo-class boards)
+- Teensy 4.x
+
+Other Arduino-compatible boards may work, but are not currently part of the automated test matrix.
 
 ---
 
@@ -555,6 +575,25 @@ Use `clearAllLatched()` (often triggered by a long-press on a reset button).
 
 **Q: Can I force a latch ON/OFF from code?**
 Yes — `setLatched(button, true/false)` updates latch state without generating a press event, and sets the “latched changed” flag.
+
+---
+
+## Compatibility Testing
+
+All examples are regularly compiled across supported platforms using PlatformIO.
+
+Before each release, `pio run -c platformio.ci.ini` is used to verify cross-platform compatibility.
+
+---
+
+## Contributing / Issues
+
+If you encounter issues on unsupported platforms, please include:
+
+- Board name
+- Core version
+- PlatformIO / Arduino IDE version
+- Minimal repro sketch
 
 ---
 

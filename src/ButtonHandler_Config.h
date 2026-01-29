@@ -6,14 +6,13 @@
  * @file ButtonHandler_Config.h
  * @author Little Man Builds (Darren Osborne)
  * @date 2025-08-30
- * @copyright Copyright © 2025 Little Man Builds
+ * @copyright Copyright © 2026 Little Man Builds
  */
 
 #pragma once
 
 #include <Arduino.h>
-#include <cstddef>
-#include <cstdint>
+#include <ButtonCompatibility.h>
 
 #ifndef BUTTON_LIST
 #error "Universal_Button: Define BUTTON_LIST(X) before including <Universal_Button.h>. See README.md for the pattern."

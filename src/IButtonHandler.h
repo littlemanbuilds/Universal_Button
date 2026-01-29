@@ -6,15 +6,13 @@
  * @file IButtonHandler.h
  * @author Little Man Builds (Darren Osborne)
  * @date 2025-08-05
- * @copyright Copyright © 2025 Little Man Builds
+ * @copyright Copyright © 2026 Little Man Builds
  */
 
 #pragma once
 
 #include <ButtonTypes.h>
-#include <cstdint>
-#include <bitset>
-#include <type_traits>
+#include <ButtonCompatibility.h>
 
 /**
  * @brief Abstract interface for button event handlers.
@@ -80,7 +78,22 @@ public:
     }
 
     /**
-     * @brief Write the current debounced state into a bitset (bit i == pressed).
+     * @brief Write the current debounced state into a compat bitset (bit i == pressed).
+     * @tparam N Size of the destination bitset.
+     * @param out Destination bitset; bits beyond size() remain unchanged/false.
+     */
+    template <size_t N>
+    void snapshot(UB::compat::bitset<N> &out) const noexcept
+    {
+        out.reset();
+        const uint8_t n = static_cast<uint8_t>(N < size() ? N : size());
+        for (uint8_t i = 0; i < n; ++i)
+            out.set(i, isPressed(i));
+    }
+
+#if UB_HAS_STD_BITSET
+    /**
+     * @brief Write the current debounced state into a std::bitset (bit i == pressed).
      * @tparam N Size of the destination bitset.
      * @param out Destination bitset; bits beyond size() remain unchanged/false.
      */
@@ -92,34 +105,65 @@ public:
         for (uint8_t i = 0; i < n; ++i)
             out.set(i, isPressed(i));
     }
+#endif
 
     // ---- Enum-friendly overloads (no cast needed in call sites) ---- //
 
-    template <typename E, typename std::enable_if<std::is_enum<E>::value, int>::type = 0>
+    /**
+     * @brief Query whether a button is currently pressed using an enum identifier.
+     * @tparam E Enum type representing button IDs.
+     * @param buttonId Button identifier (enum value).
+     * @return True if the button is currently pressed; false otherwise.
+     */
+    template <typename E, UB::compat::enable_if_t<UB::compat::is_enum<E>::value, int> = 0>
     [[nodiscard]] bool isPressed(E buttonId) const noexcept
     {
         return isPressed(static_cast<uint8_t>(buttonId));
     }
 
-    template <typename E, typename std::enable_if<std::is_enum<E>::value, int>::type = 0>
+    /**
+     * @brief Get the most recent press type of a button using an enum identifier.
+     * @tparam E Enum type representing button IDs.
+     * @param buttonId Button identifier (enum value).
+     * @return Last detected press type (short, long, double, etc.).
+     */
+    template <typename E, UB::compat::enable_if_t<UB::compat::is_enum<E>::value, int> = 0>
     ButtonPressType getPressType(E buttonId) noexcept
     {
         return getPressType(static_cast<uint8_t>(buttonId));
     }
 
-    template <typename E, typename std::enable_if<std::is_enum<E>::value, int>::type = 0>
+    /**
+     * @brief Get the duration of the most recent button press using an enum identifier.
+     * @tparam E Enum type representing button IDs.
+     * @param buttonId Button identifier (enum value).
+     * @return Duration of the last press in milliseconds.
+     */
+    template <typename E, UB::compat::enable_if_t<UB::compat::is_enum<E>::value, int> = 0>
     [[nodiscard]] uint32_t getLastPressDuration(E buttonId) const noexcept
     {
         return getLastPressDuration(static_cast<uint8_t>(buttonId));
     }
 
-    template <typename E, typename std::enable_if<std::is_enum<E>::value, int>::type = 0>
+    /**
+     * @brief Query the current latched state of a button using an enum identifier.
+     * @tparam E Enum type representing button IDs.
+     * @param buttonId Button identifier (enum value).
+     * @return True if the button is latched ON; false otherwise.
+     */
+    template <typename E, UB::compat::enable_if_t<UB::compat::is_enum<E>::value, int> = 0>
     [[nodiscard]] bool isLatched(E buttonId) const noexcept
     {
         return isLatched(static_cast<uint8_t>(buttonId));
     }
 
-    template <typename E, typename std::enable_if<std::is_enum<E>::value, int>::type = 0>
+    /**
+     * @brief Query and clear the latched-change flag using an enum identifier.
+     * @tparam E Enum type representing button IDs.
+     * @param buttonId Button identifier (enum value).
+     * @return True if the latched state changed since last query; false otherwise.
+     */
+    template <typename E, UB::compat::enable_if_t<UB::compat::is_enum<E>::value, int> = 0>
     bool getAndClearLatchedChanged(E buttonId) noexcept
     {
         return getAndClearLatchedChanged(static_cast<uint8_t>(buttonId));

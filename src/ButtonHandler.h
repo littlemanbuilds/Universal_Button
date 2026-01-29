@@ -6,7 +6,7 @@
  * @file ButtonHandler.h
  * @author Little Man Builds (Darren Osborne)
  * @date 2025-08-05
- * @copyright Copyright © 2025 Little Man Builds
+ * @copyright Copyright © 2026 Little Man Builds
  */
 
 #pragma once
@@ -14,10 +14,7 @@
 #include <Arduino.h>
 #include <ButtonTypes.h>
 #include <IButtonHandler.h>
-#include <type_traits>
-#include <bitset>
-#include <cstdint>
-#include <cstddef>
+#include <ButtonCompatibility.h>
 
 /**
  * @brief Generic multi-button handler (adaptable to any digital input source).
@@ -258,7 +255,7 @@ public:
      * @param c Per-button overrides (0 => use global for timing fields).
      * @note Inlines to the uint8_t overload; avoids casts at call sites.
      */
-    template <typename E, typename std::enable_if<std::is_enum<E>::value, int>::type = 0>
+    template <typename E, UB::compat::enable_if_t<UB::compat::is_enum<E>::value, int> = 0>
     void setPerConfig(E e, const ButtonPerConfig &c) noexcept
     {
         setPerConfig(static_cast<uint8_t>(e), c);
@@ -271,7 +268,7 @@ public:
      * @param en true to enable; false to disable.
      * @note Inlines to the uint8_t overload; avoids casts at call sites.
      */
-    template <typename E, typename std::enable_if<std::is_enum<E>::value, int>::type = 0>
+    template <typename E, UB::compat::enable_if_t<UB::compat::is_enum<E>::value, int> = 0>
     void enable(E e, bool en) noexcept
     {
         enable(static_cast<uint8_t>(e), en);
@@ -284,7 +281,7 @@ public:
      * @param activeLow true => LOW is pressed; false => HIGH is pressed.
      * @note Inlines to the uint8_t overload; avoids casts at call sites.
      */
-    template <typename E, typename std::enable_if<std::is_enum<E>::value, int>::type = 0>
+    template <typename E, UB::compat::enable_if_t<UB::compat::is_enum<E>::value, int> = 0>
     void setActiveLow(E e, bool activeLow) noexcept
     {
         setActiveLow(static_cast<uint8_t>(e), activeLow);
@@ -474,8 +471,7 @@ public:
      * @param b Button index enum value (e.g., ButtonIndex or a local enum class).
      * @param on Desired latched state (true = ON, false = OFF).
      */
-    template <typename E,
-              typename std::enable_if<std::is_enum<E>::value, int>::type = 0>
+    template <typename E, UB::compat::enable_if_t<UB::compat::is_enum<E>::value, int> = 0>
     void setLatched(E b, bool on) noexcept
     {
         setLatched(static_cast<uint8_t>(b), on);
@@ -571,7 +567,7 @@ public:
      * @param buttonId Enumerated button identifier.
      * @return true if the debounced state is pressed; false otherwise.
      */
-    template <typename E, typename std::enable_if<std::is_enum<E>::value, int>::type = 0>
+    template <typename E, UB::compat::enable_if_t<UB::compat::is_enum<E>::value, int> = 0>
     [[nodiscard]] bool isPressed(E buttonId) const noexcept
     {
         return isPressed(static_cast<uint8_t>(buttonId));
@@ -583,7 +579,7 @@ public:
      * @param buttonId Enumerated button identifier.
      * @return ButtonPressType event: Short, Long, or None.
      */
-    template <typename E, typename std::enable_if<std::is_enum<E>::value, int>::type = 0>
+    template <typename E, UB::compat::enable_if_t<UB::compat::is_enum<E>::value, int> = 0>
     ButtonPressType getPressType(E buttonId) noexcept
     {
         return getPressType(static_cast<uint8_t>(buttonId));
@@ -596,7 +592,7 @@ public:
      * @return Milliseconds of the most recent *completed* press for buttonId.
      *         Returns 0 if no press has been recorded yet or if buttonId is out of range.
      */
-    template <typename E, typename std::enable_if<std::is_enum<E>::value, int>::type = 0>
+    template <typename E, UB::compat::enable_if_t<UB::compat::is_enum<E>::value, int> = 0>
     [[nodiscard]] uint32_t getLastPressDuration(E buttonId) const noexcept
     {
         return getLastPressDuration(static_cast<uint8_t>(buttonId));
@@ -608,7 +604,7 @@ public:
      * @param buttonId Enumerated button identifier.
      * @return true if latched ON; false otherwise.
      */
-    template <typename E, typename std::enable_if<std::is_enum<E>::value, int>::type = 0>
+    template <typename E, UB::compat::enable_if_t<UB::compat::is_enum<E>::value, int> = 0>
     [[nodiscard]] bool isLatched(E buttonId) const noexcept
     {
         return isLatched(static_cast<uint8_t>(buttonId));
@@ -620,7 +616,7 @@ public:
      * @param buttonId Enumerated button identifier.
      * @return true if the latched state changed since the previous call (and clears the flag).
      */
-    template <typename E, typename std::enable_if<std::is_enum<E>::value, int>::type = 0>
+    template <typename E, UB::compat::enable_if_t<UB::compat::is_enum<E>::value, int> = 0>
     bool getAndClearLatchedChanged(E buttonId) noexcept
     {
         return getAndClearLatchedChanged(static_cast<uint8_t>(buttonId));
@@ -629,19 +625,19 @@ public:
 private:
     // ---- Storage ---- //
 
-    uint8_t pins_[N]{};                ///< Pin or logical IDs.
-    bool last_state_[N];               ///< Last committed (debounced) state.
-    bool last_state_read_[N]{};        ///< Most recent raw state (after polarity).
-    uint32_t last_state_change_[N];    ///< Timestamp (ms) when raw state last changed.
-    uint32_t press_start_[N];          ///< Timestamp (ms) when press started (committed).
-    ButtonPressType event_[N];         ///< Pending event (short/long/double) per button.
-    bool pending_short_[N]{};          ///< Pending single waiting for possible double.
-    uint32_t pending_since_[N]{};      ///< Timestamp (ms) of first short release.
-    ButtonPerConfig per_[N];           ///< Per-button overrides (timing, polarity, enable).
-    ButtonTimingConfig timing_;        ///< Global debounce and press-duration configuration.
-    uint32_t last_duration_[N];        ///< Last measured press duration (ms), set on release.
-    std::bitset<N> latched_{};         ///< Latched state per button.
-    std::bitset<N> latched_changed_{}; ///< Edge flag: latched state changed since last clear.
+    uint8_t pins_[N]{};                       ///< Pin or logical IDs.
+    bool last_state_[N];                      ///< Last committed (debounced) state.
+    bool last_state_read_[N]{};               ///< Most recent raw state (after polarity).
+    uint32_t last_state_change_[N];           ///< Timestamp (ms) when raw state last changed.
+    uint32_t press_start_[N];                 ///< Timestamp (ms) when press started (committed).
+    ButtonPressType event_[N];                ///< Pending event (short/long/double) per button.
+    bool pending_short_[N]{};                 ///< Pending single waiting for possible double.
+    uint32_t pending_since_[N]{};             ///< Timestamp (ms) of first short release.
+    ButtonPerConfig per_[N];                  ///< Per-button overrides (timing, polarity, enable).
+    ButtonTimingConfig timing_;               ///< Global debounce and press-duration configuration.
+    uint32_t last_duration_[N];               ///< Last measured press duration (ms), set on release.
+    UB::compat::bitset<N> latched_{};         ///< Latched state per button.
+    UB::compat::bitset<N> latched_changed_{}; ///< Edge flag: latched state changed since last clear.
 
     // ---- Readers ---- //
 

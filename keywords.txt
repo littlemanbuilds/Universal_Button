@@ -1,65 +1,66 @@
 #######################################
 # Datatypes (KEYWORD1)
 #######################################
-ButtonHandler	KEYWORD1
-IButtonHandler	KEYWORD1
-ButtonPressType	KEYWORD1
-ButtonTimingConfig	KEYWORD1
-ButtonPerConfig	KEYWORD1
-ButtonPins	KEYWORD1
-ButtonIndex	KEYWORD1
-Button	KEYWORD1
-TimeFn	KEYWORD1
-LatchMode	KEYWORD1
-LatchTrigger	KEYWORD1
+ButtonHandler            KEYWORD1
+IButtonHandler           KEYWORD1
+ButtonPressType          KEYWORD1
+ButtonTimingConfig       KEYWORD1
+ButtonPerConfig          KEYWORD1
+ButtonPins               KEYWORD1
+ButtonIndex              KEYWORD1
+Button                   KEYWORD1
+TimeFn                   KEYWORD1
+LatchMode                KEYWORD1
+LatchTrigger             KEYWORD1
+Universal_Button_Compat  KEYWORD1
 
 #######################################
 # Methods and Functions (KEYWORD2)
 #######################################
 # Factories (easy header)
-makeButtons	KEYWORD2
-makeButtonsWithPins	KEYWORD2
-makeButtonsWithReader	KEYWORD2
-makeButtonsWithPinsAndReader	KEYWORD2
-makeButtonsWithReaderCtx	KEYWORD2
-makeButtonsWithPinsAndReaderCtx	KEYWORD2
+makeButtons                        KEYWORD2
+makeButtonsWithPins                KEYWORD2
+makeButtonsWithReader              KEYWORD2
+makeButtonsWithPinsAndReader       KEYWORD2
+makeButtonsWithReaderCtx           KEYWORD2
+makeButtonsWithPinsAndReaderCtx    KEYWORD2
 
 # Core APIs
-update	KEYWORD2
-isPressed	KEYWORD2
-getPressType	KEYWORD2
-getLastPressDuration	KEYWORD2
-reset	KEYWORD2
-pressedMask	KEYWORD2
-snapshot	KEYWORD2
-forEach	KEYWORD2
-size	KEYWORD2
-sizeStatic	KEYWORD2
+update                    KEYWORD2
+isPressed                 KEYWORD2
+getPressType               KEYWORD2
+getLastPressDuration       KEYWORD2
+reset                     KEYWORD2
+pressedMask               KEYWORD2
+snapshot                  KEYWORD2
+forEach                   KEYWORD2
+size                      KEYWORD2
+sizeStatic                KEYWORD2
 
 # Runtime configuration
-setReadPinFn	KEYWORD2
-setReadFn	KEYWORD2
-setTiming	KEYWORD2
-setGlobalTiming	KEYWORD2
-setPerConfig	KEYWORD2
-enable	KEYWORD2
-setActiveLow	KEYWORD2
-setTimeFn	KEYWORD2
-isLatched	KEYWORD2
-latchedMask	KEYWORD2
-getAndClearLatchedChanged	KEYWORD2
-setLatched	KEYWORD2
-clearAllLatched	KEYWORD2
-clearLatchedMask	KEYWORD2
+setReadPinFn               KEYWORD2
+setReadFn                  KEYWORD2
+setTiming                  KEYWORD2
+setGlobalTiming            KEYWORD2
+setPerConfig               KEYWORD2
+enable                     KEYWORD2
+setActiveLow               KEYWORD2
+setTimeFn                  KEYWORD2
+isLatched                  KEYWORD2
+latchedMask                KEYWORD2
+getAndClearLatchedChanged  KEYWORD2
+setLatched                 KEYWORD2
+clearAllLatched            KEYWORD2
+clearLatchedMask           KEYWORD2
 
 # Utils (device-agnostic)
-indexFromKey	KEYWORD2
-indexFromKeyIn	KEYWORD2
+indexFromKey               KEYWORD2
+indexFromKeyIn             KEYWORD2
 
 #######################################
 # Constants / Macros (LITERAL1)
 #######################################
-UNIVERSAL_BUTTON_VERSION	LITERAL1
-BUTTON_LIST	LITERAL1
-BUTTON_PINS	LITERAL1
-NUM_BUTTONS	LITERAL1
+UNIVERSAL_BUTTON_VERSION   LITERAL1
+BUTTON_LIST                LITERAL1
+BUTTON_PINS                LITERAL1
+NUM_BUTTONS                LITERAL1

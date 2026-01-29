@@ -1,3 +1,14 @@
+/**
+ * MIT License
+ *
+ * @brief Public umbrella header for the Universal_Button library.
+ *
+ * @file Universal_Button.h
+ * @author Little Man Builds (Darren Osborne)
+ * @date 2025-08-05
+ * @copyright Copyright © 2026 Little Man Builds
+ */
+
 #pragma once
 
 #include <Arduino.h>
@@ -6,7 +17,7 @@
 
 // ---- Version macro ---- //
 
-#define UNIVERSAL_BUTTON_VERSION "1.6.1"
+#define UNIVERSAL_BUTTON_VERSION "1.6.2"
 
 // ---- Aliases ---- //
 
