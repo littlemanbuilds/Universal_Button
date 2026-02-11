@@ -14,10 +14,6 @@
 #include <Arduino.h>
 #include <ButtonCompatibility.h>
 
-#ifndef BUTTON_LIST
-#error "Universal_Button: Define BUTTON_LIST(X) before including <Universal_Button.h>. See README.md for the pattern."
-#endif
-
 /**
  * @brief Button pin assignments/index.
  *
@@ -27,8 +23,15 @@
  *       X(Start, 4)        \
  *       X(Stop,  5)
  *
- * If not defined, default provided (TestButton on GPIO 25).
+ * If not defined, a default is provided (TestButton on GPIO 25).
+ *
+ * Define UB_REQUIRE_BUTTON_LIST before including this header if you want
+ * to enforce an explicit project mapping and reject the default fallback.
  */
+#if !defined(BUTTON_LIST) && defined(UB_REQUIRE_BUTTON_LIST)
+#error "Universal_Button: Define BUTTON_LIST(X) before including <Universal_Button.h>."
+#endif
+
 #ifndef BUTTON_LIST
 #define BUTTON_LIST(X) \
     X(TestButton, 25) ///< INPUT_PULLUP; pressed == LOW.

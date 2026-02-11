@@ -47,7 +47,9 @@ void loop()
         else
         {
             const uint32_t ms = btns.getLastPressDuration(LocalButton::TestButton1);
-            Serial.printf("TestButton1 released after %u ms!\n", ms);
+            Serial.print(F("TestButton1 released after "));
+            Serial.print(ms);
+            Serial.println(F(" ms!"));
         }
     }
 
@@ -61,7 +63,9 @@ void loop()
         else
         {
             const uint32_t ms = btns.getLastPressDuration(LocalButton::TestButton2);
-            Serial.printf("TestButton2 released after %u ms!\n", ms);
+            Serial.print(F("TestButton2 released after "));
+            Serial.print(ms);
+            Serial.println(F(" ms!"));
         }
     }
 

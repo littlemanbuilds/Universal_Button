@@ -79,9 +79,18 @@ void setup()
     Serial.begin(115200);
     delay(50);
 
-    // I2C.
-    Wire.begin(/* SDA = */ 8, /* SCL = */ 9); ///< For ESP32-S3 DevKitC-1.
-    mcp.begin_I2C(MCP_ADDR);                  ///< Adafruit MCP23017 v2.x uses begin_I2C; v1.x uses begin(addr).
+    // Initialize I2C.
+    Wire.begin();
+
+    // Initialize the MCP23017.
+    if (!mcp.begin_I2C(MCP_ADDR))
+    {
+        Serial.println("MCP23017 not found!");
+        while (true)
+        {
+            delay(1000);
+        }
+    }
 
     configureMcpPins();
 

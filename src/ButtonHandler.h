@@ -29,6 +29,7 @@ template <size_t N> ///< Sets the number of buttons at compile time.
 class ButtonHandler : public IButtonHandler
 {
     static_assert(N > 0, "Button<N>: N must be greater than 0.");
+    static_assert(N <= 255, "ButtonHandler<N>: N must be <= 255 to fit the uint8_t API.");
 
 public:
     // ---- Types ---- //
@@ -80,6 +81,7 @@ public:
             last_state_read_[i] = false;
             last_state_change_[i] = t0;
             press_start_[i] = 0;
+            has_press_start_[i] = false;
             event_[i] = ButtonPressType::None;
             per_[i] = ButtonPerConfig{};
             last_duration_[i] = 0;
@@ -115,6 +117,7 @@ public:
             last_state_read_[i] = false;
             last_state_change_[i] = t0;
             press_start_[i] = 0;
+            has_press_start_[i] = false;
             event_[i] = ButtonPressType::None;
             per_[i] = ButtonPerConfig{};
             last_duration_[i] = 0;
@@ -151,6 +154,7 @@ public:
             last_state_read_[i] = false;
             last_state_change_[i] = t0;
             press_start_[i] = 0;
+            has_press_start_[i] = false;
             event_[i] = ButtonPressType::None;
             per_[i] = ButtonPerConfig{};
             last_duration_[i] = 0;
@@ -205,15 +209,21 @@ public:
      * @brief Apply per-button overrides/flags by numeric index.
      * @param id Button index [0..N-1].
      * @param c Overrides (0 => use global for timing fields).
+     * @note If c.enabled is false, runtime state is cleared (same behavior as enable(id, false)).
      * @note Silently ignored if id is out of range.
      */
     void setPerConfig(uint8_t id, const ButtonPerConfig &c) noexcept
     {
         if (id < N)
         {
+            const bool was_enabled = per_[id].enabled;
             per_[id] = c;
 
-            // Latched state is preserved when updating per-config at runtime.
+            // Keep behavior consistent with enable(id, false): disabling clears runtime state.
+            if (was_enabled && !per_[id].enabled)
+                resetButton_(static_cast<size_t>(id), time_now());
+
+            // For enabled buttons, latched state is preserved at runtime.
             // latch_initial is only applied on reset() (and at construction).
         }
     }
@@ -296,6 +306,24 @@ public:
     [[nodiscard]] uint8_t size() const noexcept override { return static_cast<uint8_t>(N); }
 
     /**
+     * @brief Compile-time number of logical buttons.
+     * @return N as uint8_t.
+     */
+    [[nodiscard]] static constexpr uint8_t sizeStatic() noexcept { return static_cast<uint8_t>(N); }
+
+    /**
+     * @brief Iterate all debounced button states.
+     * @tparam F Callable with signature f(uint8_t index, bool pressed).
+     * @param f Callback invoked once per button.
+     */
+    template <typename F>
+    void forEach(F &&f) const noexcept
+    {
+        for (size_t i = 0; i < N; ++i)
+            f(static_cast<uint8_t>(i), last_state_[i]);
+    }
+
+    /**
      * @brief Scan and process button states using the configured time source.
      */
     void update() noexcept override { update(time_now()); }
@@ -342,11 +370,12 @@ public:
                 {
                     // Transition: released -> pressed (commit).
                     press_start_[i] = now;
+                    has_press_start_[i] = true;
                 }
                 else
                 {
                     // Transition: pressed -> released (commit).
-                    const uint32_t duration = press_start_[i] ? (now - press_start_[i]) : 0U;
+                    const uint32_t duration = has_press_start_[i] ? (now - press_start_[i]) : 0U;
                     last_duration_[i] = duration; ///< Record exact duration for retrieval.
 
                     if (duration >= lms)
@@ -381,6 +410,7 @@ public:
                     }
 
                     press_start_[i] = 0;
+                    has_press_start_[i] = false;
                 }
             }
 
@@ -480,7 +510,7 @@ public:
     /**
      * @brief Clear all latched states.
      */
-    void clearAllLatched() noexcept
+    void clearAllLatched() noexcept override
     {
         for (size_t i = 0; i < N; ++i)
         {
@@ -496,7 +526,7 @@ public:
      * @brief Clear a subset of latched states using a bitmask.
      * @param mask Bitmask of button indices to clear (bit0 = button 0, etc.).
      */
-    void clearLatchedMask(uint32_t mask) noexcept
+    void clearLatchedMask(uint32_t mask) noexcept override
     {
         for (size_t i = 0; i < N && i < 32; ++i)
         {
@@ -550,6 +580,7 @@ public:
             last_state_read_[i] = false; ///< Last raw (post-polarity) state.
             last_state_change_[i] = t0;  ///< Restart debounce window.
             press_start_[i] = 0;
+            has_press_start_[i] = false;
             event_[i] = ButtonPressType::None;
             last_duration_[i] = 0;
             pending_short_[i] = false;
@@ -630,6 +661,7 @@ private:
     bool last_state_read_[N]{};               ///< Most recent raw state (after polarity).
     uint32_t last_state_change_[N];           ///< Timestamp (ms) when raw state last changed.
     uint32_t press_start_[N];                 ///< Timestamp (ms) when press started (committed).
+    bool has_press_start_[N]{};               ///< True when press_start_ holds a valid timestamp.
     ButtonPressType event_[N];                ///< Pending event (short/long/double) per button.
     bool pending_short_[N]{};                 ///< Pending single waiting for possible double.
     uint32_t pending_since_[N]{};             ///< Timestamp (ms) of first short release.
@@ -669,6 +701,7 @@ private:
         last_state_read_[i] = false;
         last_state_change_[i] = now;
         press_start_[i] = 0U;
+        has_press_start_[i] = false;
         event_[i] = ButtonPressType::None;
         pending_short_[i] = false;
         pending_since_[i] = 0U;

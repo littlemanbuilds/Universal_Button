@@ -12,7 +12,6 @@ Button                   KEYWORD1
 TimeFn                   KEYWORD1
 LatchMode                KEYWORD1
 LatchTrigger             KEYWORD1
-Universal_Button_Compat  KEYWORD1
 
 #######################################
 # Methods and Functions (KEYWORD2)
@@ -64,3 +63,5 @@ UNIVERSAL_BUTTON_VERSION   LITERAL1
 BUTTON_LIST                LITERAL1
 BUTTON_PINS                LITERAL1
 NUM_BUTTONS                LITERAL1
+UB_REQUIRE_BUTTON_LIST     LITERAL1
+UB_UTIL_NO_CONFIG_MAP      LITERAL1

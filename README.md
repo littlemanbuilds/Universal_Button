@@ -4,7 +4,7 @@ Generic multi‑button handler for Arduino/ESP platforms with solid debounce and
 The library is **device‑agnostic** (works with plain GPIO) and can also read buttons from external sources (e.g., MCP23017 port expanders) by plugging in a custom reader function.  
 It includes enum‑friendly helpers, per‑button overrides, **exact last‑press duration**, utilities, a clean “easy header” with factories, and (from v1.6.0) **latching** support.
 
-- **New in v1.4.0:** optional **time source injection (`TimeFn`)** and Arduino‑free factories so you can use RTOS clocks (e.g., FreeRTOS ticks) or any millisecond source without modifying your sketch structure.
+- **New in v1.4.0:** optional **time source injection (`TimeFn`)** and time-source factory overloads so you can use RTOS clocks (e.g., FreeRTOS ticks) or any millisecond source.
 - **New in v1.5.0:** **double‑click detection** (`ButtonPressType::Double`) with global and per‑button configuration (`double_click_ms`), plus small runtime helpers (`enable`, `setActiveLow`, `setGlobalTiming`) and enum‑friendly overloads for smoother call‑sites.
 - **New in v1.6.0:** **latching behaviour** (toggle / set / reset) driven by a chosen press event (**Short / Long / Double**). Each button can opt‑in via `ButtonPerConfig` and you can query `isLatched()`, `latchedMask()`, an edge flag `getAndClearLatchedChanged()`, and you can also force/clear latches from application code via `setLatched()`, `clearAllLatched()`, and `clearLatchedMask()` (useful for “global reset” policies).
 
@@ -19,11 +19,12 @@ It includes enum‑friendly helpers, per‑button overrides, **exact last‑pres
 - **Short / Long / Double press detection**
 - **Latching support**: toggle / set / reset driven by a chosen press event
 - **Exact last press duration**
-- **Convenience helpers**: enum overloads, `pressedMask()`, `snapshot()`, `forEach()`
-- **Per‑button overrides** (`debounce_ms`, `short_press_ms`, `long_press_ms`, `double_click_ms`, `active_low`, `enabled`
+- **Convenience helpers**: enum overloads, `pressedMask()`, `snapshot()`, `forEach()`, `sizeStatic()`
+- **Per‑button overrides**: `debounce_ms`, `short_press_ms`, `long_press_ms`, `double_click_ms`, `active_low`, `enabled`, and latching config
 - **Pluggable readers** (GPIO, MCP, custom; pointer or context‑aware)
 - **Header‑only** integration
 - **Optional TimeFn** (inject custom millisecond clock; falls back to `millis()`)
+- **Compile-time options**: `UB_REQUIRE_BUTTON_LIST` and `UB_UTIL_NO_CONFIG_MAP`
 
 ---
 
@@ -36,6 +37,7 @@ It includes enum‑friendly helpers, per‑button overrides, **exact last‑pres
   - [Supported Platforms](#supported-platforms)
   - [Concepts](#concepts)
   - [Configuration Mapping](#configuration-mapping)
+  - [Compile-Time Options](#compile-time-options)
   - [Quick Use (Easy Header)](#quick-use-easy-header)
   - [Latching](#latching)
     - [Latch modes](#latch-modes)
@@ -120,12 +122,45 @@ Define your buttons once using `BUTTON_LIST(X)` **before including** `Universal_
 
 This generates:
 
-- `inline constexpr uint8_t BUTTON_PINS[] = {4, 5};`
-- `inline constexpr size_t NUM_BUTTONS = 2;`
+- `constexpr uint8_t BUTTON_PINS[] = {4, 5};`
+- `constexpr size_t NUM_BUTTONS = 2;`
 - `enum class ButtonIndex : uint8_t { Start, Stop, _COUNT };`
 - `struct ButtonPins { static constexpr uint8_t Start=4; static constexpr uint8_t Stop=5; };`
 
 A **default** mapping is provided (single `TestButton` on pin 25) if you do nothing.
+
+If your project requires an explicit mapping, define `UB_REQUIRE_BUTTON_LIST` before including `Universal_Button.h`; in that mode, missing `BUTTON_LIST(X)` is a compile-time error.
+
+---
+
+## Compile-Time Options
+
+### `UB_REQUIRE_BUTTON_LIST`
+
+By default, the library provides a fallback mapping (`TestButton` on pin 25).  
+If you want to **forbid** that fallback and require every sketch to define an explicit mapping, set:
+
+```cpp
+#define UB_REQUIRE_BUTTON_LIST
+#define BUTTON_LIST(X) \
+  X(Start, 4) \
+  X(Stop, 5)
+#include <Universal_Button.h>
+```
+
+### `UB_UTIL_NO_CONFIG_MAP`
+
+`Universal_Button_Utils.h` can expose:
+
+- `indexFromKey(...)` for config-based mapping (`BUTTON_PINS`)
+- `indexFromKeyIn(...)` for explicit arrays
+
+If you only want the generic helper and do **not** want config mapping pulled in, set:
+
+```cpp
+#define UB_UTIL_NO_CONFIG_MAP
+#include <Universal_Button_Utils.h> // exposes indexFromKeyIn(...) only
+```
 
 ---
 
@@ -278,6 +313,15 @@ static Button btns = makeButtons(
   /*timeFn=*/[]() -> uint32_t { return (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS); });
 ```
 
+3. **Direct timestamped updates (no injected function):**
+
+```cpp
+void loop() {
+  const uint32_t now = (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS);
+  btns.update(now);
+}
+```
+
 > If no `TimeFn` is provided, the handler uses `millis()` internally. All debounce and press durations are measured on the chosen time base.
 
 ---
@@ -292,10 +336,16 @@ Declared in **`ButtonTypes.h`**:
 enum class ButtonPressType : uint8_t { None, Short, Long, Double };
 
 struct ButtonTimingConfig {
-  uint32_t debounce_ms     = 30;
-  uint32_t short_press_ms  = 100;
-  uint32_t long_press_ms   = 1500;
-  uint32_t double_click_ms = 400;
+  uint32_t debounce_ms;
+  uint32_t short_press_ms;
+  uint32_t long_press_ms;
+  uint32_t double_click_ms;
+
+  constexpr ButtonTimingConfig(
+    uint32_t debounce = 30,
+    uint32_t short_press = 200,
+    uint32_t long_press = 1000,
+    uint32_t double_click = 400);
 };
 
 enum class LatchMode : uint8_t { Toggle, Set, Reset };
@@ -339,18 +389,23 @@ public:
   [[nodiscard]] virtual uint8_t size() const noexcept = 0;
 
   // Aggregates
-  [[nodiscard]] virtual uint32_t pressedMask() const noexcept { return 0U; }
+  [[nodiscard]] virtual uint32_t pressedMask() const noexcept;      // bit0..31
+  template <size_t N> void snapshot(UB::compat::bitset<N>& out) const noexcept;
+#if UB_HAS_STD_BITSET
   template <size_t N> void snapshot(std::bitset<N>& out) const noexcept;
+#endif
 
-  // Latching (query / observation only)
+  // Latching (query / control / observation)
   [[nodiscard]] virtual bool isLatched(uint8_t id) const noexcept { return false; }
-  [[nodiscard]] virtual uint32_t latchedMask() const noexcept { return 0U; }
+  virtual void setLatched(uint8_t id, bool on) noexcept { }
+  virtual void clearAllLatched() noexcept { }
+  virtual void clearLatchedMask(uint32_t mask) noexcept { }
+  [[nodiscard]] virtual uint32_t latchedMask() const noexcept;      // bit0..31
   virtual bool getAndClearLatchedChanged(uint8_t id) noexcept { return false; }
-
-  // Latch *control* methods are intentionally NOT part of the interface.
-};
 };
 ```
+
+`pressedMask()`/`latchedMask()` are 32-bit aggregates by design (buttons `0..31`).
 
 ### Concrete: `ButtonHandler<N>`
 
@@ -407,11 +462,14 @@ static constexpr uint8_t sizeStatic() noexcept { return (uint8_t)N; }
 
 // Aggregates
 [[nodiscard]] uint32_t pressedMask() const noexcept;   // N <= 32
+template <size_t M> void snapshot(UB::compat::bitset<M>& out) const noexcept;
+#if UB_HAS_STD_BITSET
 template <size_t M> void snapshot(std::bitset<M>& out) const noexcept;
+#endif
 template <typename F> void forEach(F&& f) const noexcept; // f(index, pressed)
 
 // Force a specific latch state
-void setLatched(ButtonIndex b, bool on) noexcept;
+template <typename E> void setLatched(E b, bool on) noexcept;  // enum-friendly overload
 void setLatched(uint8_t id, bool on) noexcept; // interface-compatible overload
 
 // Clear latches
@@ -419,12 +477,14 @@ void clearAllLatched() noexcept;
 void clearLatchedMask(uint32_t mask) noexcept; // bit i = button i
 ```
 
+`ButtonHandler<N>` enforces `N <= 255` at compile time to match the `uint8_t` index/size API.
+
 **Runtime configuration:**
 
 ```cpp
 void setTiming(ButtonTimingConfig);            // alias of setGlobalTiming
 void setGlobalTiming(ButtonTimingConfig);
-void setPerConfig(uint8_t id, const ButtonPerConfig&);
+void setPerConfig(uint8_t id, const ButtonPerConfig&); // cfg.enabled=false clears runtime state
 template <typename E> void setPerConfig(E id, const ButtonPerConfig&);
 void enable(uint8_t id, bool en);
 template <typename E> void enable(E id, bool en);
@@ -489,14 +549,19 @@ In **`Universal_Button_Utils.h`** (device‑agnostic):
 
 ```cpp
 namespace UB { namespace util {
+#ifndef UB_UTIL_NO_CONFIG_MAP
   uint8_t indexFromKey(uint8_t key); // for config mapping (BUTTON_PINS/NUM_BUTTONS)
+#endif
 
   template <size_t N>
   uint8_t indexFromKeyIn(const uint8_t (&pins)[N], uint8_t key); // for explicit pins arrays
 }}
 ```
 
-`pressedMask()`, `snapshot()`, and `forEach()` live on `ButtonHandler<N>` and are independent of device/reader.
+`indexFromKey(...)` and `indexFromKeyIn(...)` return `0xFF` when the key is not found.  
+Both utility mappers support up to 255 entries.
+
+`pressedMask()`, `snapshot()`, and `forEach()` are available through `IButtonHandler`/`ButtonHandler<N>` and are independent of device/reader.
 
 ---
 
@@ -525,7 +590,7 @@ Build a **composite reader** and set `skipPinInit=true`. Manually call `pinMode(
 - **I²C/SPI expanders**: consider cached snapshots to reduce bus traffic and get coherent “chord” readings (A+B together).
 - The debounce algorithm is independent of the reader; call `update()` at a steady cadence (e.g., every 5–10 ms).
 - Double‑click adds only O(1) per‑button state and zero heap allocations.
-- Latching adds two `std::bitset<N>` fields (latched state + “changed” edge flag) and is updated only on finalized events. Latch control APIs update the same bitsets and only run when you call them (no extra work in `update()`).
+- Latching adds two `UB::compat::bitset<N>` fields (latched state + “changed” edge flag) and is updated only on finalized events. Latch control APIs update the same bitsets and only run when you call them (no extra work in `update()`).
 
 ---
 
@@ -536,6 +601,10 @@ Create a `ButtonPerConfig`, set non‑zero fields, and call `setPerConfig(id, cf
 
 **Q: How do I revert to global timing?**  
 Set the per‑button field back to `0` (e.g., `double_click_ms = 0`).
+
+**Q: What happens if I disable a button at runtime?**  
+`enable(id, false)` clears that button’s debouncer/event/latch runtime state.  
+`setPerConfig(id, cfg)` behaves the same when `cfg.enabled = false`.
 
 **Q: Do I need `setTimeFn()` on Arduino?**  
 No — `millis()` is default.
@@ -576,13 +645,20 @@ Use `clearAllLatched()` (often triggered by a long-press on a reset button).
 **Q: Can I force a latch ON/OFF from code?**
 Yes — `setLatched(button, true/false)` updates latch state without generating a press event, and sets the “latched changed” flag.
 
+**Q: Is there a maximum button count?**  
+Yes. `ButtonHandler<N>` currently enforces `N <= 255` because the public index and size API is `uint8_t`.
+
+**Q: Are pressed/latch masks full-width for all buttons?**  
+No. `pressedMask()` and `latchedMask()` are 32-bit aggregates and represent buttons `0..31`.
+
 ---
 
 ## Compatibility Testing
 
 All examples are regularly compiled across supported platforms using PlatformIO.
 
-Before each release, `pio run -c platformio.ci.ini` is used to verify cross-platform compatibility.
+Before each release, run a full environment matrix (for example):  
+`pio run -e esp32-s3-devkitc-1 -e esp8266_nodemcuv2 -e pico -e mkrzero -e nano_every -e uno -e teensy41 -e bluepill_f103c8`
 
 ---
 

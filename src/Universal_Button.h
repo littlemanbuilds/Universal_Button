@@ -17,7 +17,7 @@
 
 // ---- Version macro ---- //
 
-#define UNIVERSAL_BUTTON_VERSION "1.6.2"
+#define UNIVERSAL_BUTTON_VERSION "1.6.3"
 
 // ---- Aliases ---- //
 
