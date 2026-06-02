@@ -7,6 +7,7 @@ It includes enum‑friendly helpers, per‑button overrides, **exact last‑pres
 - **New in v1.4.0:** optional **time source injection (`TimeFn`)** and time-source factory overloads so you can use RTOS clocks (e.g., FreeRTOS ticks) or any millisecond source.
 - **New in v1.5.0:** **double‑click detection** (`ButtonPressType::Double`) with global and per‑button configuration (`double_click_ms`), plus small runtime helpers (`enable`, `setActiveLow`, `setGlobalTiming`) and enum‑friendly overloads for smoother call‑sites.
 - **New in v1.6.0:** **latching behaviour** (toggle / set / reset) driven by a chosen press event (**Short / Long / Double**). Each button can opt‑in via `ButtonPerConfig` and you can query `isLatched()`, `latchedMask()`, an edge flag `getAndClearLatchedChanged()`, and you can also force/clear latches from application code via `setLatched()`, `clearAllLatched()`, and `clearLatchedMask()` (useful for “global reset” policies).
+- **New in v1.7.0:** `peekPressType()` for non‑consuming event reads, clearer Arduino/non‑Arduino timing notes, and release-package hygiene updates.
 
 > **Author:** Little Man Builds  
 > **License:** MIT
@@ -20,6 +21,7 @@ It includes enum‑friendly helpers, per‑button overrides, **exact last‑pres
 - **Latching support**: toggle / set / reset driven by a chosen press event
 - **Exact last press duration**
 - **Convenience helpers**: enum overloads, `pressedMask()`, `snapshot()`, `forEach()`, `sizeStatic()`
+- **Non-consuming event peek**: `peekPressType()` lets diagnostics/UI code observe a pending event before another layer consumes it
 - **Per‑button overrides**: `debounce_ms`, `short_press_ms`, `long_press_ms`, `double_click_ms`, `active_low`, `enabled`, and latching config
 - **Pluggable readers** (GPIO, MCP, custom; pointer or context‑aware)
 - **Header‑only** integration
@@ -73,7 +75,9 @@ It includes enum‑friendly helpers, per‑button overrides, **exact last‑pres
 
 ## Supported Platforms
 
-This library is continuously tested on the following platforms:
+The main supported target is the **Arduino framework**. Native GPIO mode uses Arduino `pinMode()`, `digitalRead()`, and `millis()`; external-reader mode lets the same debouncer/event logic read from GPIO adapters, MCP23017 expanders, cached bus snapshots, or your own hardware layer.
+
+The examples are regularly compile-tested with PlatformIO on:
 
 - AVR (Uno, Nano, Mega-class boards)
 - megaAVR (Nano Every)
@@ -85,6 +89,13 @@ This library is continuously tested on the following platforms:
 - Teensy 4.x
 
 Other Arduino-compatible boards may work, but are not currently part of the automated test matrix.
+
+**ESP32 / FreeRTOS notes:**
+
+- The library stays Arduino-framework focused on every listed target; it does not pretend that native GPIO mode is portable to non-Arduino SDKs.
+- `xTaskGetTickCount()` / `portTICK_PERIOD_MS` examples are ESP32/FreeRTOS integration examples. On other platforms, supply whatever millisecond clock is correct for that platform, or just use the default Arduino `millis()`.
+- Outside Arduino builds, use an external reader plus a `TimeFn`, or call `update(now_ms)` with your own timestamp. Without Arduino and without `TimeFn`, there is no implicit clock to use.
+- MCP23017 examples depend on `Wire` and the Adafruit MCP23X17 library; real hardware support follows those dependencies and your board wiring.
 
 ---
 
@@ -99,6 +110,7 @@ Other Arduino-compatible boards may work, but are not currently part of the auto
 
 - Track the **last raw state** and the **time it changed**.
 - When the raw state stays unchanged for `debounce_ms`, we **commit** it and generate an event on release based on **press duration** (`short_press_ms`, `long_press_ms`) and possibly **double‑click** if a second short arrives within `double_click_ms`.
+- Because double‑click detection has to wait for a possible second short press, a **Short** event is delayed until the `double_click_ms` window expires. A **Double** emits as soon as the second short press is finalized.
 - **Exact duration** is recorded for retrieval with `getLastPressDuration()` (for a Double, duration is of the **second** press).
 
 **Latching:**
@@ -322,7 +334,9 @@ void loop() {
 }
 ```
 
-> If no `TimeFn` is provided, the handler uses `millis()` internally. All debounce and press durations are measured on the chosen time base.
+> If no `TimeFn` is provided in an Arduino build, the handler uses `millis()` internally. All debounce and press durations are measured on the chosen time base.
+
+For non-Arduino builds, do not rely on the implicit `millis()` fallback. Provide `TimeFn` in the constructor/factory, call `setTimeFn()` before using `update()`, or call `update(now_ms)` directly with your own monotonic millisecond timestamp. Native GPIO fallback is also Arduino-only; non-Arduino builds should use `ReadPinFn`/`ReadFn` readers.
 
 ---
 
@@ -382,6 +396,7 @@ public:
   // Press state & events
   [[nodiscard]] virtual bool isPressed(uint8_t id) const noexcept = 0;
   virtual ButtonPressType getPressType(uint8_t id) noexcept = 0;
+  [[nodiscard]] virtual ButtonPressType peekPressType(uint8_t id) const noexcept;
   [[nodiscard]] virtual uint32_t getLastPressDuration(uint8_t id) const noexcept { return 0U; }
 
   // Lifecycle
@@ -405,7 +420,9 @@ public:
 };
 ```
 
-`pressedMask()`/`latchedMask()` are 32-bit aggregates by design (buttons `0..31`).
+`getPressType()` consumes the pending event; `peekPressType()` returns the same pending event without clearing it. This is useful when one part of your sketch wants to observe/log an event before another part handles it.
+
+`pressedMask()`/`latchedMask()` are 32-bit aggregates by design and only cover buttons `0..31`, even though `ButtonHandler<N>` supports up to 255 logical buttons. Use `snapshot()` or `forEach()` when you need all buttons.
 
 ### Concrete: `ButtonHandler<N>`
 
@@ -447,6 +464,9 @@ template <typename E> bool isPressed(E id) const noexcept;
 ButtonPressType getPressType(uint8_t id) noexcept;
 template <typename E> ButtonPressType getPressType(E id) noexcept;
 
+[[nodiscard]] ButtonPressType peekPressType(uint8_t id) const noexcept;
+template <typename E> [[nodiscard]] ButtonPressType peekPressType(E id) const noexcept;
+
 [[nodiscard]] uint32_t getLastPressDuration(uint8_t id) const noexcept;
 template <typename E> [[nodiscard]] uint32_t getLastPressDuration(E id) const noexcept;
 
@@ -461,7 +481,7 @@ void reset() noexcept;
 static constexpr uint8_t sizeStatic() noexcept { return (uint8_t)N; }
 
 // Aggregates
-[[nodiscard]] uint32_t pressedMask() const noexcept;   // N <= 32
+[[nodiscard]] uint32_t pressedMask() const noexcept;   // buttons 0..31 only
 template <size_t M> void snapshot(UB::compat::bitset<M>& out) const noexcept;
 #if UB_HAS_STD_BITSET
 template <size_t M> void snapshot(std::bitset<M>& out) const noexcept;
@@ -474,7 +494,7 @@ void setLatched(uint8_t id, bool on) noexcept; // interface-compatible overload
 
 // Clear latches
 void clearAllLatched() noexcept;
-void clearLatchedMask(uint32_t mask) noexcept; // bit i = button i
+void clearLatchedMask(uint32_t mask) noexcept; // bit i = button i, buttons 0..31 only
 ```
 
 `ButtonHandler<N>` enforces `N <= 255` at compile time to match the `uint8_t` index/size API.
@@ -484,9 +504,9 @@ void clearLatchedMask(uint32_t mask) noexcept; // bit i = button i
 ```cpp
 void setTiming(ButtonTimingConfig);            // alias of setGlobalTiming
 void setGlobalTiming(ButtonTimingConfig);
-void setPerConfig(uint8_t id, const ButtonPerConfig&); // cfg.enabled=false clears runtime state
+void setPerConfig(uint8_t id, const ButtonPerConfig&); // cfg.enabled=false clears runtime + latch state
 template <typename E> void setPerConfig(E id, const ButtonPerConfig&);
-void enable(uint8_t id, bool en);
+void enable(uint8_t id, bool en);              // disabling clears runtime + latch state
 template <typename E> void enable(E id, bool en);
 void setActiveLow(uint8_t id, bool activeLow);
 template <typename E> void setActiveLow(E id, bool activeLow);
@@ -497,6 +517,8 @@ void setTimeFn(uint32_t (*TimeFn)());
 
 > **Note on latching and `setPerConfig()`:** `latch_initial` is applied during construction and `reset()`.  
 > If you change `latch_initial` at runtime and want it to take effect immediately, call `reset()` after `setPerConfig()`.
+>
+> Disabling a button with `enable(id, false)` or `setPerConfig(id, cfg)` where `cfg.enabled=false` clears that button’s debouncer state, pending event, pending double-click, last duration, latched state, and latch-changed flag. Re-enabling starts from a clean OFF/unlatched state; `latch_initial` is applied again only by `reset()`.
 
 ### Factories (Easy Header)
 
@@ -603,11 +625,14 @@ Create a `ButtonPerConfig`, set non‑zero fields, and call `setPerConfig(id, cf
 Set the per‑button field back to `0` (e.g., `double_click_ms = 0`).
 
 **Q: What happens if I disable a button at runtime?**  
-`enable(id, false)` clears that button’s debouncer/event/latch runtime state.  
-`setPerConfig(id, cfg)` behaves the same when `cfg.enabled = false`.
+`enable(id, false)` clears that button’s debouncer state, pending event, pending double-click, last duration, latched state, and latch-changed flag.
+`setPerConfig(id, cfg)` behaves the same when `cfg.enabled = false`. Re-enabling starts clean; call `reset()` if you want `latch_initial` applied again.
 
 **Q: Do I need `setTimeFn()` on Arduino?**  
 No — `millis()` is default.
+
+**Q: Can I use this outside Arduino?**
+Yes for the core debouncer/event logic, but use adapter mode: provide a reader (`ReadPinFn`/`ReadFn`) and a `TimeFn`, or call `update(now_ms)`. Native GPIO fallback (`pinMode`, `digitalRead`, `millis`) is Arduino-only.
 
 **Q: Does a long press contribute to a double‑click?**  
 No. A double consists of **two short** presses; long presses are reported as `Long` and don’t combine with a pending single.
@@ -649,7 +674,10 @@ Yes — `setLatched(button, true/false)` updates latch state without generating 
 Yes. `ButtonHandler<N>` currently enforces `N <= 255` because the public index and size API is `uint8_t`.
 
 **Q: Are pressed/latch masks full-width for all buttons?**  
-No. `pressedMask()` and `latchedMask()` are 32-bit aggregates and represent buttons `0..31`.
+No. `pressedMask()`, `latchedMask()`, and `clearLatchedMask()` use 32-bit masks and represent buttons `0..31` only. `ButtonHandler<N>` can manage up to 255 buttons; use `snapshot()` or `forEach()` for wider sets.
+
+**Q: Can I inspect an event without consuming it?**
+Yes. Use `peekPressType(id)` to read the pending event without clearing it. Use `getPressType(id)` when you are ready to consume it.
 
 ---
 

@@ -11,7 +11,6 @@
 
 #pragma once
 
-#include <Arduino.h>
 #include <ButtonCompatibility.h>
 
 /**

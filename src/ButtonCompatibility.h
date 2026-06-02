@@ -14,6 +14,24 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#ifndef UB_HAS_ARDUINO
+#if defined(ARDUINO)
+#define UB_HAS_ARDUINO 1
+#elif defined(__has_include)
+#if __has_include(<Arduino.h>)
+#define UB_HAS_ARDUINO 1
+#else
+#define UB_HAS_ARDUINO 0
+#endif
+#else
+#define UB_HAS_ARDUINO 0
+#endif
+#endif
+
+#if UB_HAS_ARDUINO
+#include <Arduino.h>
+#endif
+
 #if defined(__has_include)
 #if __has_include(<type_traits>)
 #include <type_traits>

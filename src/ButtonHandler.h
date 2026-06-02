@@ -11,10 +11,9 @@
 
 #pragma once
 
-#include <Arduino.h>
+#include <ButtonCompatibility.h>
 #include <ButtonTypes.h>
 #include <IButtonHandler.h>
-#include <ButtonCompatibility.h>
 
 /**
  * @brief Generic multi-button handler (adaptable to any digital input source).
@@ -50,8 +49,9 @@ public:
     using ReadFn = bool (*)(void *ctx, uint8_t id);
 
     /**
-     * @brief Time function to use for update(); nullptr → uses ::millis().
+     * @brief Time function to use for update(); nullptr uses ::millis() when Arduino is available.
      * @note Signature is uint32_t() for easier cross-RTOS integration; millis() is implicitly narrowed.
+     *       Outside Arduino builds, provide TimeFn or call update(now_ms).
      */
     using TimeFn = uint32_t (*)();
 
@@ -59,11 +59,12 @@ public:
     // ---- Construction ---- //
 
     /**
-     * @brief Construct a Button handler using native GPIO reads.
+     * @brief Construct a Button handler using native Arduino GPIO reads.
      * @param buttonPins Reference to an array of length N with pin IDs.
      * @param timing Global debounce/press-duration configuration.
      * @param skipPinInit If true, GPIO mode is not configured here. Set to true when pins are configured elsewhere.
-     * @param timeFn Optional time source (ms). If nullptr, uses millis().
+     * @note Outside Arduino builds, prefer an external reader constructor and a TimeFn/update(now_ms).
+     * @param timeFn Optional time source (ms). If nullptr, uses millis() on Arduino.
      */
     ButtonHandler(const uint8_t (&buttonPins)[N],
                   ButtonTimingConfig timing = {},
@@ -76,7 +77,7 @@ public:
         {
             pins_[i] = buttonPins[i];
             if (!skipPinInit)
-                pinMode(pins_[i], INPUT_PULLUP);
+                initPin_(pins_[i]);
             last_state_[i] = false;
             last_state_read_[i] = false;
             last_state_change_[i] = t0;
@@ -98,7 +99,7 @@ public:
      * @param readPin Fast reader: bool(uint8_t id) returns pressed.
      * @param timing Global debounce/press-duration configuration.
      * @param skipPinInit If false, pins are set to INPUT_PULLUP here.
-     * @param timeFn Optional time source (ms). If nullptr, uses millis().
+     * @param timeFn Optional time source (ms). If nullptr, uses millis() on Arduino.
      */
     ButtonHandler(const uint8_t (&buttonPins)[N],
                   ReadPinFn readPin,
@@ -112,7 +113,7 @@ public:
         {
             pins_[i] = buttonPins[i];
             if (!skipPinInit)
-                pinMode(pins_[i], INPUT_PULLUP);
+                initPin_(pins_[i]);
             last_state_[i] = false;
             last_state_read_[i] = false;
             last_state_change_[i] = t0;
@@ -135,7 +136,7 @@ public:
      * @param ctx Pointer passed to readCb on each call.
      * @param timing Global debounce/press-duration configuration.
      * @param skipPinInit If false, pins are set to INPUT_PULLUP here.
-     * @param timeFn Optional time source (ms). If nullptr, uses millis().
+     * @param timeFn Optional time source (ms). If nullptr, uses millis() on Arduino.
      */
     ButtonHandler(const uint8_t (&buttonPins)[N],
                   ReadFn readCb, void *ctx,
@@ -149,7 +150,7 @@ public:
         {
             pins_[i] = buttonPins[i];
             if (!skipPinInit)
-                pinMode(pins_[i], INPUT_PULLUP);
+                initPin_(pins_[i]);
             last_state_[i] = false;
             last_state_read_[i] = false;
             last_state_change_[i] = t0;
@@ -189,7 +190,7 @@ public:
     /**
      * @brief Inject a time source (milliseconds).
      * @param fn Function pointer: uint32_t() returning current time in ms.
-     * @note If nullptr, uses Arduino ::millis() implicitly via time_now().
+     * @note If nullptr, uses Arduino ::millis() implicitly via time_now() when Arduino is available.
      */
     void setTimeFn(TimeFn fn) noexcept { time_fn_ = fn; }
 
@@ -209,7 +210,9 @@ public:
      * @brief Apply per-button overrides/flags by numeric index.
      * @param id Button index [0..N-1].
      * @param c Overrides (0 => use global for timing fields).
-     * @note If c.enabled is false, runtime state is cleared (same behavior as enable(id, false)).
+     * @note If c.enabled is false, debouncer/event state, pending double-click state,
+     *       last duration, latched state, and latch-changed flag are cleared
+     *       (same behavior as enable(id, false)).
      * @note Silently ignored if id is out of range.
      */
     void setPerConfig(uint8_t id, const ButtonPerConfig &c) noexcept
@@ -232,6 +235,8 @@ public:
      * @brief Enable/disable a button at runtime.
      * @param id Button index [0..N-1].
      * @param en true to enable; false to disable.
+     * @note Disabling clears debouncer/event state, pending double-click state,
+     *       last duration, latched state, and latch-changed flag for this button.
      * @note Silently ignored if id is out of range.
      */
     void enable(uint8_t id, bool en) noexcept
@@ -349,7 +354,7 @@ public:
             // Read raw physical level: prefer fast per-pin fn, else ctx-callback, else native.
             const bool pressed_default =
                 (read_pin_fn_) ? read_pin_fn_(pins_[i])
-                               : (read_fn_ ? read_fn_(read_ctx_, pins_[i]) : (digitalRead(pins_[i]) == LOW));
+                               : (read_fn_ ? read_fn_(read_ctx_, pins_[i]) : readNative_(pins_[i], per_[i].active_low));
 
             // Apply active level (default: active-low => pressed when LOW).
             const bool raw = per_[i].active_low ? pressed_default : !pressed_default;
@@ -445,7 +450,7 @@ public:
     /**
      * @brief Get and consume the press event type for a button.
      * @param buttonId Index of button.
-     * @return ButtonPressType::Short, ::Long, ::None if no new event.
+     * @return ButtonPressType::Short, ::Long, ::Double, or ::None if no new event.
      */
     ButtonPressType getPressType(uint8_t buttonId) noexcept override
     {
@@ -454,6 +459,18 @@ public:
         const ButtonPressType e = event_[buttonId];
         event_[buttonId] = ButtonPressType::None; // consume
         return e;
+    }
+
+    /**
+     * @brief Peek at the pending press event without consuming it.
+     * @param buttonId Index of button.
+     * @return ButtonPressType::Short, ::Long, ::Double, or ::None if no event is waiting.
+     * @note Useful when one part of an application needs to observe an event
+     *       before another part consumes it with getPressType().
+     */
+    [[nodiscard]] ButtonPressType peekPressType(uint8_t buttonId) const noexcept override
+    {
+        return (buttonId < N) ? event_[buttonId] : ButtonPressType::None;
     }
 
     /**
@@ -524,7 +541,7 @@ public:
 
     /**
      * @brief Clear a subset of latched states using a bitmask.
-     * @param mask Bitmask of button indices to clear (bit0 = button 0, etc.).
+     * @param mask Bitmask of button indices to clear (bit0 = button 0, etc.; buttons 0..31 only).
      */
     void clearLatchedMask(uint32_t mask) noexcept override
     {
@@ -541,6 +558,7 @@ public:
     /**
      * @brief Build a 32-bit latched mask.
      * @return Bitmask where bit i is set when button i is latched ON (up to 32 buttons).
+     * @note ButtonHandler<N> supports up to 255 buttons, but this helper only reports buttons 0..31.
      */
     [[nodiscard]] uint32_t latchedMask() const noexcept override
     {
@@ -617,6 +635,18 @@ public:
     }
 
     /**
+     * @brief Enum-friendly overload of peekPressType().
+     * @tparam E Enum type (must satisfy std::is_enum<E>::value).
+     * @param buttonId Enumerated button identifier.
+     * @return Pending ButtonPressType event without consuming it.
+     */
+    template <typename E, UB::compat::enable_if_t<UB::compat::is_enum<E>::value, int> = 0>
+    [[nodiscard]] ButtonPressType peekPressType(E buttonId) const noexcept
+    {
+        return peekPressType(static_cast<uint8_t>(buttonId));
+    }
+
+    /**
      * @brief Enum-friendly wrapper for querying the exact duration (ms) of the last completed press.
      * @tparam E Enum type (must satisfy std::is_enum<E>::value).
      * @param buttonId Enumerated button identifier.
@@ -682,11 +712,53 @@ private:
     TimeFn time_fn_{nullptr};
 
     /**
+     * @brief Configure a native Arduino GPIO pin when Arduino support is available.
+     * @param pin MCU GPIO pin number.
+     * @note Outside Arduino builds this is intentionally a no-op; use skipPinInit=true
+     *       and configure inputs in the platform adapter/application.
+     */
+    static inline void initPin_(uint8_t pin) noexcept
+    {
+#if UB_HAS_ARDUINO
+        pinMode(pin, INPUT_PULLUP);
+#else
+        (void)pin;
+#endif
+    }
+
+    /**
+     * @brief Read a native Arduino GPIO button using the library default polarity.
+     * @param pin MCU GPIO pin number.
+     * @param activeLow Current button polarity.
+     * @return true when the pin reads LOW on Arduino; inactive fallback when no native GPIO API exists.
+     * @note Non-Arduino builds should provide ReadPinFn/ReadFn readers instead of relying
+     *       on the native GPIO fallback.
+     */
+    static inline bool readNative_(uint8_t pin, bool activeLow) noexcept
+    {
+#if UB_HAS_ARDUINO
+        (void)activeLow;
+        return digitalRead(pin) == LOW;
+#else
+        (void)pin;
+        // Return the value that becomes "not pressed" after the active_low transform below.
+        return activeLow ? false : true;
+#endif
+    }
+
+    /**
      * @brief Resolve the current time in ms. Uses injected TimeFn when provided, otherwise Arduino millis().
+     * @note Outside Arduino builds, pass TimeFn or call update(now); otherwise this returns 0.
      */
     inline uint32_t time_now() const noexcept
     {
-        return time_fn_ ? time_fn_() : millis();
+        if (time_fn_)
+            return time_fn_();
+#if UB_HAS_ARDUINO
+        return millis();
+#else
+        return 0U;
+#endif
     }
 
     /**

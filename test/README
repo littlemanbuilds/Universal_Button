@@ -1,4 +1,12 @@
 
+Universal_Button support note:
+
+This library targets Arduino-framework builds. The regular compile-test matrix
+covers AVR, megaAVR, ESP32, ESP8266, RP2040, SAMD, STM32, and Teensy 4.x.
+ESP32/FreeRTOS timing examples are ESP32-focused; other boards should use
+Arduino millis() or supply their own TimeFn. See the root README for the
+full supported/tested target notes.
+
 This directory is intended for PlatformIO Test Runner and project tests.
 
 Unit Testing is a software testing method by which individual units of

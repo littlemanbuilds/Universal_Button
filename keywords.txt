@@ -28,6 +28,7 @@ makeButtonsWithPinsAndReaderCtx    KEYWORD2
 update                    KEYWORD2
 isPressed                 KEYWORD2
 getPressType               KEYWORD2
+peekPressType              KEYWORD2
 getLastPressDuration       KEYWORD2
 reset                     KEYWORD2
 pressedMask               KEYWORD2

@@ -1,8 +1,8 @@
 {
   "name": "Universal_Button",
-  "version": "1.6.3",
-  "description": "Generic multi-button handler with debounce and short/long/double press events plus optional latching. Pluggable readers (GPIO/expanders), per-button overrides (timing/polarity/enable incl. double_click_ms + latch config), enum-friendly API, helpers, and custom time-source injection for RTOS-style integration. Includes latch control APIs (setLatched/clearAllLatched/clearLatchedMask), strict mapping opt-in (UB_REQUIRE_BUTTON_LIST), and utility key-index helpers.",
-  "keywords": "button, debounce, short-press, long-press, double-click, double-press, latch, latching, toggle, set, reset, event, input, gpio, mcp23017, expander, arduino, esp32, rtos, freertos, time, millis, timefn, pressedmask, snapshot, foreach, sizestatic, indexfromkey, indexfromkeyin, latchedmask, setlatched, clearalllatched, clearlatchedmask, button_list, ub_require_button_list, ub_util_no_config_map, global-reset",
+  "version": "1.7.0",
+  "description": "Generic multi-button handler with debounce and short/long/double press events plus optional latching. Pluggable readers (GPIO/expanders), per-button overrides (timing/polarity/enable incl. double_click_ms + latch config), enum-friendly API, helpers, non-consuming peekPressType(), and custom time-source injection for RTOS-style integration. Includes latch control APIs (setLatched/clearAllLatched/clearLatchedMask), strict mapping opt-in (UB_REQUIRE_BUTTON_LIST), and utility key-index helpers.",
+  "keywords": "button, debounce, short-press, long-press, double-click, double-press, latch, latching, toggle, set, reset, event, input, gpio, mcp23017, expander, arduino, esp32, rtos, freertos, time, millis, timefn, peekpresstype, pressedmask, snapshot, foreach, sizestatic, indexfromkey, indexfromkeyin, latchedmask, setlatched, clearalllatched, clearlatchedmask, button_list, ub_require_button_list, ub_util_no_config_map, global-reset",
   "license": "MIT",
   "authors": [
     {

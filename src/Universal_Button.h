@@ -11,13 +11,12 @@
 
 #pragma once
 
-#include <Arduino.h>
 #include <ButtonHandler_Config.h>
 #include <ButtonHandler.h>
 
 // ---- Version macro ---- //
 
-#define UNIVERSAL_BUTTON_VERSION "1.6.3"
+#define UNIVERSAL_BUTTON_VERSION "1.7.0"
 
 // ---- Aliases ---- //
 
@@ -149,7 +148,7 @@ inline ButtonHandler<N> makeButtonsWithPinsAndReaderCtx(const uint8_t (&pins)[N]
     return ButtonHandler<N>(pins, read, ctx, timing, skipPinInit);
 }
 
-// ---- Arduino-free overloads ---- //
+// ---- Time-source overloads (useful for RTOS or non-Arduino adapter mode) ---- //
 
 /**
  * @brief Zero-boilerplate factory with explicit pins and optional time source.
@@ -158,7 +157,7 @@ inline ButtonHandler<N> makeButtonsWithPinsAndReaderCtx(const uint8_t (&pins)[N]
  * @param pins Reference to an array of length N with pin IDs.
  * @param timing Global debounce/press-duration configuration.
  * @param skipPinInit If true, GPIO mode is NOT configured in this factory.
- * @param timeFn Optional time source (ms). nullptr → use millis().
+ * @param timeFn Optional time source (ms). nullptr uses millis() on Arduino; non-Arduino users should supply one.
  * @return A ready-to-use ButtonHandler<N>.
  */
 template <size_t N>
@@ -175,7 +174,7 @@ inline ButtonHandler<N> makeButtonsWithPins(const uint8_t (&pins)[N],
  *
  * @param timing Global debounce/press-duration configuration.
  * @param skipPinInit If true, GPIO mode is NOT configured in this factory.
- * @param timeFn Optional time source (ms). nullptr → use millis().
+ * @param timeFn Optional time source (ms). nullptr uses millis() on Arduino; non-Arduino users should supply one.
  * @return A ready-to-use Button.
  */
 inline Button makeButtons(ButtonTimingConfig timing, bool skipPinInit, Button::TimeFn timeFn)
@@ -189,7 +188,7 @@ inline Button makeButtons(ButtonTimingConfig timing, bool skipPinInit, Button::T
  * @param read Reader: bool(uint8_t id) → pressed?
  * @param timing Global debounce/press-duration configuration.
  * @param skipPinInit If true, pinMode is not called for BUTTON_PINS.
- * @param timeFn Optional time source (ms). nullptr → use millis().
+ * @param timeFn Optional time source (ms). nullptr uses millis() on Arduino; non-Arduino users should supply one.
  * @return A Button sized by NUM_BUTTONS.
  */
 inline Button makeButtonsWithReader(bool (*read)(uint8_t),
@@ -208,7 +207,7 @@ inline Button makeButtonsWithReader(bool (*read)(uint8_t),
  * @param read Reader: bool(uint8_t id) → pressed?
  * @param timing Global debounce/press-duration configuration.
  * @param skipPinInit If true, pinMode is not called for pins.
- * @param timeFn Optional time source (ms). nullptr → use millis().
+ * @param timeFn Optional time source (ms). nullptr uses millis() on Arduino; non-Arduino users should supply one.
  * @return A ButtonHandler<N>.
  */
 template <size_t N>
@@ -228,7 +227,7 @@ inline ButtonHandler<N> makeButtonsWithPinsAndReader(const uint8_t (&pins)[N],
  * @param ctx Opaque pointer passed back to read on each call.
  * @param timing Global debounce/press-duration configuration.
  * @param skipPinInit If true, pinMode is not called for BUTTON_PINS.
- * @param timeFn Optional time source (ms). nullptr → use millis().
+ * @param timeFn Optional time source (ms). nullptr uses millis() on Arduino; non-Arduino users should supply one.
  * @return A Button sized by NUM_BUTTONS.
  */
 inline Button makeButtonsWithReaderCtx(bool (*read)(void *, uint8_t), void *ctx,
@@ -248,7 +247,7 @@ inline Button makeButtonsWithReaderCtx(bool (*read)(void *, uint8_t), void *ctx,
  * @param ctx Opaque pointer passed back to read on each call.
  * @param timing Global debounce/press-duration configuration.
  * @param skipPinInit If true, pinMode is not called for pins.
- * @param timeFn Optional time source (ms). nullptr → use millis().
+ * @param timeFn Optional time source (ms). nullptr uses millis() on Arduino; non-Arduino users should supply one.
  * @return A ButtonHandler<N>.
  */
 template <size_t N>

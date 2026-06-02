@@ -50,6 +50,13 @@ public:
     virtual ButtonPressType getPressType(uint8_t buttonId) noexcept = 0;
 
     /**
+     * @brief Peek at the pending press event for a button without consuming it.
+     * @param buttonId Index of button.
+     * @return ButtonPressType Event type: Short, Long, Double, or None.
+     */
+    [[nodiscard]] virtual ButtonPressType peekPressType(uint8_t /*buttonId*/) const noexcept { return ButtonPressType::None; }
+
+    /**
      * @brief Exact duration (ms) of the most recent completed press.
      */
     [[nodiscard]] virtual uint32_t getLastPressDuration(uint8_t /*buttonId*/) const noexcept { return 0U; }
@@ -67,6 +74,7 @@ public:
 
     /**
      * @brief Build a 32-bit pressed mask (bit i == 1 iff button i is pressed).
+     * @note Only buttons 0..31 are represented. Use snapshot()/forEach() for wider handlers.
      */
     [[nodiscard]] virtual uint32_t pressedMask() const noexcept
     {
@@ -134,6 +142,18 @@ public:
     }
 
     /**
+     * @brief Peek at the pending press type using an enum identifier, without consuming it.
+     * @tparam E Enum type representing button IDs.
+     * @param buttonId Button identifier (enum value).
+     * @return Pending press type (short, long, double, etc.).
+     */
+    template <typename E, UB::compat::enable_if_t<UB::compat::is_enum<E>::value, int> = 0>
+    [[nodiscard]] ButtonPressType peekPressType(E buttonId) const noexcept
+    {
+        return peekPressType(static_cast<uint8_t>(buttonId));
+    }
+
+    /**
      * @brief Get the duration of the most recent button press using an enum identifier.
      * @tparam E Enum type representing button IDs.
      * @param buttonId Button identifier (enum value).
@@ -190,13 +210,14 @@ public:
 
     /**
      * @brief Clear a subset of latched states using a bitmask.
-     * @param mask Bitmask of button indices to clear (bit0 = button 0, etc.).
+     * @param mask Bitmask of button indices to clear (bit0 = button 0, etc.; buttons 0..31 only).
      */
     virtual void clearLatchedMask(uint32_t /*mask*/) noexcept {}
 
     /**
      * @brief Build a 32-bit latched mask.
      * @return Bitmask where bit i is set when button i is latched ON (up to 32 buttons).
+     * @note Only buttons 0..31 are represented. Use isLatched()/forEach-style loops for wider handlers.
      */
     [[nodiscard]] virtual uint32_t latchedMask() const noexcept
     {
