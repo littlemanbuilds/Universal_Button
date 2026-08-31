@@ -1,61 +1,57 @@
 /**
  * MIT License
  *
- * @brief Small, device-agnostic helpers for Universal_Button sketches and adapters:
- *        map configured BUTTON_PINS “keys” to logical indices, plus a generic
- *        variant for explicit pin arrays.
+ * @brief Device-agnostic mapping helpers for Universal_Button adapters and sketches.
  *
  * @file Universal_Button_Utils.h
  * @author Little Man Builds (Darren Osborne)
- * @date 2025-08-30
+ * @date 2026-08-07
  * @copyright Copyright © 2026 Little Man Builds
  */
 
 #pragma once
 
-#include <ButtonCompatibility.h>
+#include "ButtonCompatibility.h"
 
 #ifndef UB_UTIL_NO_CONFIG_MAP
-#include <ButtonHandler_Config.h>
+#include "ButtonHandler_Config.h"
 #endif
 
-namespace UB::util
+namespace UB
 {
-#ifndef UB_UTIL_NO_CONFIG_MAP
-    /**
-     * @brief Map a BUTTON_PINS "key" (the configured pin value) to its logical index.
-     * @note Define UB_UTIL_NO_CONFIG_MAP before including this header to omit this helper
-     *       when only generic array-based mapping is needed.
-     * @return 0..NUM_BUTTONS-1 on success, 0xFF if not found.
-     */
-    inline uint8_t indexFromKey(uint8_t key)
+    namespace util
     {
-        static_assert(NUM_BUTTONS <= 255, "indexFromKey() supports up to 255 mapped keys.");
-
-        for (size_t i = 0; i < NUM_BUTTONS; ++i)
+#ifndef UB_UTIL_NO_CONFIG_MAP
+        /**
+         * @brief Map a configured BUTTON_LIST key/pin value to its logical index.
+         * @param key Configured key/pin value.
+         * @return 0..NUM_BUTTONS-1 on success, or 0xFF when the key is not mapped.
+         */
+        inline uint8_t indexFromKey(uint8_t key) noexcept
         {
-            if (BUTTON_PINS[i] == key)
-                return static_cast<uint8_t>(i);
+            static_assert(config::NUM_BUTTONS <= 255u, "indexFromKey() supports at most 255 keys.");
+            for (size_t i = 0; i < config::NUM_BUTTONS; ++i)
+                if (config::BUTTON_PINS[i] == key)
+                    return static_cast<uint8_t>(i);
+            return 0xFFu;
         }
-        return 0xFF;
-    }
 #endif
 
-    /**
-     * @brief Generic variant: map a key within an explicit pins array.
-     * @tparam N Array length deduced from @p pins.
-     * @return 0..N-1 on success, 0xFF if not found.
-     */
-    template <size_t N>
-    inline uint8_t indexFromKeyIn(const uint8_t (&pins)[N], uint8_t key)
-    {
-        static_assert(N <= 255, "indexFromKeyIn() supports arrays up to 255 entries.");
-
-        for (size_t i = 0; i < N; ++i)
+        /**
+         * @brief Map a key/pin value within an explicit array to its logical index.
+         * @tparam N Array length.
+         * @param pins Explicit key/pin array.
+         * @param key Key/pin value to find.
+         * @return 0..N-1 on success, or 0xFF when the key is not present.
+         */
+        template <size_t N>
+        inline uint8_t indexFromKeyIn(const uint8_t (&pins)[N], uint8_t key) noexcept
         {
-            if (pins[i] == key)
-                return static_cast<uint8_t>(i);
+            static_assert(N <= 255u, "indexFromKeyIn() supports arrays up to 255 entries.");
+            for (size_t i = 0; i < N; ++i)
+                if (pins[i] == key)
+                    return static_cast<uint8_t>(i);
+            return 0xFFu;
         }
-        return 0xFF;
-    }
-} ///< namespace UB::util
+    } ///< namespace util
+} ///< namespace UB

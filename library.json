@@ -1,12 +1,25 @@
 {
   "name": "Universal_Button",
-  "version": "1.7.0",
-  "description": "Generic multi-button handler with debounce and short/long/double press events plus optional latching. Pluggable readers (GPIO/expanders), per-button overrides (timing/polarity/enable incl. double_click_ms + latch config), enum-friendly API, helpers, non-consuming peekPressType(), and custom time-source injection for RTOS-style integration. Includes latch control APIs (setLatched/clearAllLatched/clearLatchedMask), strict mapping opt-in (UB_REQUIRE_BUTTON_LIST), and utility key-index helpers.",
-  "keywords": "button, debounce, short-press, long-press, double-click, double-press, latch, latching, toggle, set, reset, event, input, gpio, mcp23017, expander, arduino, esp32, rtos, freertos, time, millis, timefn, peekpresstype, pressedmask, snapshot, foreach, sizestatic, indexfromkey, indexfromkeyin, latchedmask, setlatched, clearalllatched, clearlatchedmask, button_list, ub_require_button_list, ub_util_no_config_map, global-reset",
+  "version": "2.0.0",
+  "description": "Debounced multi-button input with explicit reader validity, preserved interaction events, long-hold state, synchronized recovery and optional latching.",
+  "keywords": [
+    "button",
+    "debounce",
+    "short-press",
+    "long-press",
+    "double-click",
+    "event-queue",
+    "latching",
+    "gpio",
+    "mcp23017",
+    "esp32",
+    "esp32-s3",
+    "arduino"
+  ],
   "license": "MIT",
   "authors": [
     {
-      "name": "Little Man Builds",
+      "name": "Little Man Builds (Darren Osborne)",
       "email": "littlemanbuilds@gmail.com",
       "maintainer": true
     }
@@ -19,26 +32,26 @@
   "frameworks": "arduino",
   "platforms": [
     "atmelavr",
-    "megaavr",
+    "atmelmegaavr",
     "atmelsam",
-    "samd",
     "espressif32",
     "espressif8266",
     "raspberrypi",
-    "teensy",
-    "ststm32"
+    "ststm32",
+    "teensy"
   ],
-  "headers": ["Universal_Button.h"],
+  "headers": [
+    "Universal_Button.h"
+  ],
   "build": {
-    "includeDir": "src",
-    "srcFilter": ["+<src/>"]
+    "includeDir": "src"
   },
   "examples": [
-    "examples/01_Basic_Button/01_Basic_Button.ino",
-    "examples/02_Press_Type/02_Press_Type.ino",
-    "examples/03_Local_Enum/03_Local_Enum.ino",
-    "examples/04_Port_Expander/04_Port_Expander.ino",
-    "examples/05_Cached_Read/05_Cached_Read.ino",
+    "examples/01_BasicButton/01_BasicButton.ino",
+    "examples/02_PressType/02_PressType.ino",
+    "examples/03_LocalEnum/03_LocalEnum.ino",
+    "examples/04_PortExpander/04_PortExpander.ino",
+    "examples/05_CachedRead/05_CachedRead.ino",
     "examples/06_Latching/06_Latching.ino"
   ]
 }

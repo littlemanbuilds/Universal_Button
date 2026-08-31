@@ -1,34 +1,41 @@
 /**
- * @file 05_Cached_Read.ino
+ * MIT License
  *
- * @brief MCP23017 cached read: take one snapshot per loop (GPIOA+GPIOB),
- *        then feed all button reads from that snapshot. Coherent and fast.
+ * @brief Serve multiple button reads from one coherent MCP23017 cache refresh.
+ *
+ * @file 05_CachedRead.ino
+ * @author Little Man Builds (Darren Osborne)
+ * @date 2026-08-07
+ * @copyright Copyright © 2026 Little Man Builds
  */
 
-// Explicit button mapping (compile-time). MUST be BEFORE <Universal_Button> header include.
-// When using a port expander, ButtonTest numbers are irrelevant e.g. 60, 61, 62... as long as they're different.
+// Define the logical button names before including <Universal_Button.h>.
+// With a port expander, these numbers are just unique keys used by the callback.
 #define BUTTON_LIST(X) \
     X(TestButton1, 6)  \
     X(TestButton2, 7)  \
     X(TestButton3, 8)
 
-#include <Arduino.h>
 #include <Universal_Button.h>
 #include <Universal_Button_Utils.h>
+
+#include <Arduino.h>
 #include <Wire.h>
 #include <Adafruit_MCP23X17.h>
+
+namespace ubcfg = UB::config; ///< Shorter name for the button list above.
 
 // MCP23017 wiring/config.
 constexpr uint8_t MCP_ADDR = 0x20;
 
 // Map each logical button (by enum order) to MCP pin 0..15 (0..7=A, 8..15=B).
-constexpr uint8_t MCP_PINS[NUM_BUTTONS] = {
+constexpr uint8_t MCP_PINS[ubcfg::NUM_BUTTONS] = {
     0, ///< TestButton1 -> GPA0.
     1, ///< TestButton2 -> GPA1.
     8  ///< TestButton3 -> GPB0.
 };
-static_assert(NUM_BUTTONS == (sizeof(MCP_PINS) / sizeof(MCP_PINS[0])),
-              "MCP_PINS size must match NUM_BUTTONS");
+static_assert(ubcfg::NUM_BUTTONS == (sizeof(MCP_PINS) / sizeof(MCP_PINS[0])),
+              "MCP_PINS size must match ubcfg::NUM_BUTTONS");
 
 // Custom timings (debounce, short, long) in milliseconds.
 constexpr ButtonTimingConfig kTiming{50, 300, 1500};
@@ -54,9 +61,9 @@ struct McpSnapshot
 static bool readFromSnapshot(uint8_t key)
 {
     const uint8_t idx = UB::util::indexFromKey(key);
-    if (idx < NUM_BUTTONS)
+    if (idx < ubcfg::NUM_BUTTONS)
     {
-        return snap.isLow(MCP_PINS[idx]); // renamed call
+        return snap.isLow(MCP_PINS[idx]);
     }
     return (digitalRead(key) == LOW);
 }
@@ -67,7 +74,7 @@ static Button btns = makeButtonsWithReader(readFromSnapshot, kTiming, /*skipPinI
 // Configure MCP button pins once.
 static void configureMcpPins()
 {
-    for (uint8_t i = 0; i < NUM_BUTTONS; ++i)
+    for (uint8_t i = 0; i < ubcfg::NUM_BUTTONS; ++i)
     {
         const uint8_t p = MCP_PINS[i];
         mcp.pinMode(p, INPUT_PULLUP);
@@ -102,7 +109,7 @@ void setup()
     // tBtn3.active_low = true; ///< Default remains LOW=pressed.
     // tBtn3.enabled = true; ///< Default remains enabled.
 
-    btns.setPerConfig(static_cast<uint8_t>(ButtonIndex::TestButton3), tBtn3);
+    btns.setPerConfig(static_cast<uint8_t>(ubcfg::ButtonIndex::TestButton3), tBtn3);
 }
 
 void loop()
@@ -114,9 +121,9 @@ void loop()
 
     btns.update();
 
-    const ButtonPressType btn1 = btns.getPressType(ButtonIndex::TestButton1);
-    const ButtonPressType btn2 = btns.getPressType(ButtonIndex::TestButton2);
-    const ButtonPressType btn3 = btns.getPressType(ButtonIndex::TestButton3);
+    const ButtonPressType btn1 = btns.getPressType(ubcfg::ButtonIndex::TestButton1);
+    const ButtonPressType btn2 = btns.getPressType(ubcfg::ButtonIndex::TestButton2);
+    const ButtonPressType btn3 = btns.getPressType(ubcfg::ButtonIndex::TestButton3);
 
     if (btn1 == ButtonPressType::Short)
         Serial.println("TestButton1: Short press...");

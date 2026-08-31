@@ -1,0 +1,60 @@
+name: Universal_Button CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  host:
+    name: Host validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Run host checks
+        run: bash test/run_host_checks.sh
+  portable-platformio:
+    name: Portable compile (${{ matrix.env }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        env:
+          - uno
+          - nano_every
+          - mkrzero
+          - esp32-s3-devkitc-1
+          - esp8266_nodemcuv2
+          - bluepill_f103c8
+          - teensy41
+          - pico
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.x"
+      - name: Install PlatformIO
+        run: python -m pip install platformio==6.1.19
+      - name: Compile portable smoke sketch
+        run: pio ci --project-conf platformio.ini --lib=. -e "${{ matrix.env }}" test/portable_compile/portable_compile.ino
+
+  esp32-s3-examples:
+    name: ESP32-S3 examples
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.x"
+      - name: Install PlatformIO
+        run: python -m pip install platformio==6.1.19
+      - name: Compile public examples
+        shell: bash
+        run: |
+          set -euo pipefail
+          for sketch in examples/*/*.ino; do
+            pio ci --project-conf platformio.ini --lib=. -e esp32-s3-devkitc-1 "$sketch"
+          done

@@ -1,325 +1,532 @@
 /**
  * MIT License
  *
- * @brief Generic multi-button handler with debounce and press duration detection.
+ * @brief Fixed-size multi-button handler with debouncing, interaction events, latching, and input health.
  *
  * @file ButtonHandler.h
  * @author Little Man Builds (Darren Osborne)
- * @date 2025-08-05
+ * @date 2026-08-07
  * @copyright Copyright © 2026 Little Man Builds
  */
 
 #pragma once
 
-#include <ButtonCompatibility.h>
-#include <ButtonTypes.h>
-#include <IButtonHandler.h>
+#include "ButtonCompatibility.h"
+#include "ButtonTypes.h"
+#include "IButtonHandler.h"
+
+#ifndef UB_EVENT_QUEUE_CAPACITY
+#define UB_EVENT_QUEUE_CAPACITY 16u
+#endif
+
+static_assert(UB_EVENT_QUEUE_CAPACITY > 0u, "Universal_Button: UB_EVENT_QUEUE_CAPACITY must be greater than zero.");
+static_assert(UB_EVENT_QUEUE_CAPACITY <= 255u, "Universal_Button: UB_EVENT_QUEUE_CAPACITY must fit in uint8_t.");
 
 /**
- * @brief Generic multi-button handler (adaptable to any digital input source).
- *
- * Uses a template parameter for compile-time button count, performs
- * debouncing and classifies press events (short/long). Optimized for ESP32,
- * supporting both a fast per-pin reader and a context-aware reader callback.
- *
- * @tparam N Number of logical buttons handled by this instance.
+ * @brief Tag used by constructors/factories whose bool reader returns an electrical HIGH/LOW level.
  */
-template <size_t N> ///< Sets the number of buttons at compile time.
+struct ButtonElectricalReaderTag
+{
+};
+
+/** @brief Constant tag for electrical-level reader construction. */
+constexpr ButtonElectricalReaderTag BUTTON_ELECTRICAL_READER{};
+
+/**
+ * @brief Generic fixed-size button handler.
+ *
+ * @details The handler separates four concerns:
+ *          - acquisition: obtain a trustworthy logical/electrical state;
+ *          - state: debounce into a stable pressed/released level;
+ *          - interaction: classify short/double/long behavior;
+ *          - events: preserve finalized interactions in a bounded queue.
+ *
+ * Logical pressed-state callbacks return `true` when pressed and are never
+ * polarity-transformed. Electrical-level callbacks return HIGH/LOW and use
+ * ButtonPerConfig::active_low to derive the logical state.
+ *
+ * @tparam N Number of logical buttons managed by the instance.
+ */
+template <size_t N>
 class ButtonHandler : public IButtonHandler
 {
-    static_assert(N > 0, "Button<N>: N must be greater than 0.");
-    static_assert(N <= 255, "ButtonHandler<N>: N must be <= 255 to fit the uint8_t API.");
+    static_assert(N > 0u, "ButtonHandler<N>: N must be greater than zero.");
+    static_assert(N <= 255u, "ButtonHandler<N>: N must fit the uint8_t public API.");
 
 public:
-    // ---- Types ---- //
+    // ---- Reader and time types ---- //
 
-    /**
-     * @brief Function pointer that reads a single button by pin/key.
-     * @param id Logical key/pin for the button.
-     * @return true if the button is currently pressed (active).
-     */
-    using ReadPinFn = bool (*)(uint8_t);
+    /** @brief Legacy/documented callback: returns logical pressed state. */
+    using ReadPinFn = bool (*)(uint8_t id);
 
-    /**
-     * @brief Context-aware reader callback.
-     * @param ctx Opaque user context pointer supplied at construction/setter.
-     * @param id Logical key/pin for the button.
-     * @return true if the button is currently pressed (active).
-     */
+    /** @brief Legacy/documented context callback: returns logical pressed state. */
     using ReadFn = bool (*)(void *ctx, uint8_t id);
 
-    /**
-     * @brief Time function to use for update(); nullptr uses ::millis() when Arduino is available.
-     * @note Signature is uint32_t() for easier cross-RTOS integration; millis() is implicitly narrowed.
-     *       Outside Arduino builds, provide TimeFn or call update(now_ms).
-     */
+    /** @brief Validity-aware logical pressed-state callback. */
+    using ReadResultPinFn = ButtonPressedResult (*)(uint8_t id);
+
+    /** @brief Validity-aware logical pressed-state context callback. */
+    using ReadResultFn = ButtonPressedResult (*)(void *ctx, uint8_t id);
+
+    /** @brief Electrical-level callback: true means HIGH, false means LOW. */
+    using LevelReadPinFn = bool (*)(uint8_t id);
+
+    /** @brief Electrical-level context callback: true means HIGH, false means LOW. */
+    using LevelReadFn = bool (*)(void *ctx, uint8_t id);
+
+    /** @brief Validity-aware electrical-level callback. */
+    using LevelReadResultPinFn = ButtonLevelResult (*)(uint8_t id);
+
+    /** @brief Validity-aware electrical-level context callback. */
+    using LevelReadResultFn = ButtonLevelResult (*)(void *ctx, uint8_t id);
+
+    /** @brief Millisecond time source. */
     using TimeFn = uint32_t (*)();
 
 public:
     // ---- Construction ---- //
 
     /**
-     * @brief Construct a Button handler using native Arduino GPIO reads.
-     * @param buttonPins Reference to an array of length N with pin IDs.
-     * @param timing Global debounce/press-duration configuration.
-     * @param skipPinInit If true, GPIO mode is not configured here. Set to true when pins are configured elsewhere.
-     * @note Outside Arduino builds, prefer an external reader constructor and a TimeFn/update(now_ms).
-     * @param timeFn Optional time source (ms). If nullptr, uses millis() on Arduino.
+     * @brief Construct with native Arduino GPIO input.
+     * @param buttonPins Array of N physical pin IDs.
+     * @param timing Global timing configuration.
+     * @param skipPinInit True when pin configuration is owned elsewhere.
+     * @param timeFn Optional millisecond time source.
+     * @note Native GPIO is an electrical-level source and defaults to INPUT_PULLUP/active-low.
      */
     ButtonHandler(const uint8_t (&buttonPins)[N],
                   ButtonTimingConfig timing = {},
                   bool skipPinInit = false,
                   TimeFn timeFn = nullptr) noexcept
-        : timing_{timing}, time_fn_{timeFn}
+        : timing_{timing}, reader_kind_{ReaderKind::NativeElectrical}, time_fn_{timeFn}
     {
-        const uint32_t t0 = time_now();
-        for (size_t i = 0; i < N; ++i)
-        {
-            pins_[i] = buttonPins[i];
-            if (!skipPinInit)
-                initPin_(pins_[i]);
-            last_state_[i] = false;
-            last_state_read_[i] = false;
-            last_state_change_[i] = t0;
-            press_start_[i] = 0;
-            has_press_start_[i] = false;
-            event_[i] = ButtonPressType::None;
-            per_[i] = ButtonPerConfig{};
-            last_duration_[i] = 0;
-            pending_short_[i] = false;
-            pending_since_[i] = 0;
-            latched_.set(i, per_[i].latch_initial);
-            latched_changed_.set(i, false);
-        }
+        initialize_(buttonPins, skipPinInit);
     }
 
     /**
-     * @brief Construct with a per-pin fast reader function.
-     * @param buttonPins Reference to an array of length N with pin IDs.
-     * @param readPin Fast reader: bool(uint8_t id) returns pressed.
-     * @param timing Global debounce/press-duration configuration.
-     * @param skipPinInit If false, pins are set to INPUT_PULLUP here.
-     * @param timeFn Optional time source (ms). If nullptr, uses millis() on Arduino.
+     * @brief Construct with a logical pressed-state callback.
+     * @param buttonPins Array of N pin/key IDs passed to @p readPin.
+     * @param readPin Reader returning true when the button is pressed.
+     * @param timing Global timing configuration.
+     * @param skipPinInit True to skip native pin initialization.
+     * @param timeFn Optional millisecond time source.
      */
     ButtonHandler(const uint8_t (&buttonPins)[N],
                   ReadPinFn readPin,
                   ButtonTimingConfig timing = {},
                   bool skipPinInit = true,
                   TimeFn timeFn = nullptr) noexcept
-        : timing_{timing}, read_pin_fn_{readPin}, time_fn_{timeFn}
+        : timing_{timing}, reader_kind_{ReaderKind::PressedPin}, read_pin_fn_{readPin}, time_fn_{timeFn}
     {
-        const uint32_t t0 = time_now();
-        for (size_t i = 0; i < N; ++i)
-        {
-            pins_[i] = buttonPins[i];
-            if (!skipPinInit)
-                initPin_(pins_[i]);
-            last_state_[i] = false;
-            last_state_read_[i] = false;
-            last_state_change_[i] = t0;
-            press_start_[i] = 0;
-            has_press_start_[i] = false;
-            event_[i] = ButtonPressType::None;
-            per_[i] = ButtonPerConfig{};
-            last_duration_[i] = 0;
-            pending_short_[i] = false;
-            pending_since_[i] = 0;
-            latched_.set(i, per_[i].latch_initial);
-            latched_changed_.set(i, false);
-        }
+        initialize_(buttonPins, skipPinInit);
     }
 
     /**
-     * @brief Construct with a context-aware reader callback.
-     * @param buttonPins Reference to an array of length N with pin IDs.
-     * @param readCb Reader: bool(void* ctx, uint8_t id) returns pressed.
-     * @param ctx Pointer passed to readCb on each call.
-     * @param timing Global debounce/press-duration configuration.
-     * @param skipPinInit If false, pins are set to INPUT_PULLUP here.
-     * @param timeFn Optional time source (ms). If nullptr, uses millis() on Arduino.
+     * @brief Construct with a context-aware logical pressed-state callback.
+     * @param buttonPins Array of N pin/key IDs passed to @p readCb.
+     * @param readCb Reader returning true when the button is pressed.
+     * @param ctx Opaque callback context.
+     * @param timing Global timing configuration.
+     * @param skipPinInit True to skip native pin initialization.
+     * @param timeFn Optional millisecond time source.
      */
     ButtonHandler(const uint8_t (&buttonPins)[N],
-                  ReadFn readCb, void *ctx,
+                  ReadFn readCb,
+                  void *ctx,
                   ButtonTimingConfig timing = {},
                   bool skipPinInit = true,
                   TimeFn timeFn = nullptr) noexcept
-        : timing_{timing}, read_fn_{readCb}, read_ctx_{ctx}, time_fn_{timeFn}
+        : timing_{timing}, reader_kind_{ReaderKind::PressedCtx}, read_fn_{readCb}, read_ctx_{ctx}, time_fn_{timeFn}
     {
-        const uint32_t t0 = time_now();
-        for (size_t i = 0; i < N; ++i)
-        {
-            pins_[i] = buttonPins[i];
-            if (!skipPinInit)
-                initPin_(pins_[i]);
-            last_state_[i] = false;
-            last_state_read_[i] = false;
-            last_state_change_[i] = t0;
-            press_start_[i] = 0;
-            has_press_start_[i] = false;
-            event_[i] = ButtonPressType::None;
-            per_[i] = ButtonPerConfig{};
-            last_duration_[i] = 0;
-            pending_short_[i] = false;
-            pending_since_[i] = 0;
-            latched_.set(i, per_[i].latch_initial);
-            latched_changed_.set(i, false);
-        }
+        initialize_(buttonPins, skipPinInit);
     }
 
-    // ---- Configuration setters ---- //
-
     /**
-     * @brief Set a fast per-pin reader.
-     * @param fn Function pointer: bool(uint8_t id) => pressed?
-     * @note If not set, the handler falls back to context reader or native GPIO.
+     * @brief Construct with a validity-aware logical pressed-state callback.
      */
-    void setReadPinFn(ReadPinFn fn) noexcept { read_pin_fn_ = fn; }
-
-    /**
-     * @brief Set a context-aware reader.
-     * @param fn Function pointer: bool(void* ctx, uint8_t id) => pressed?
-     * @param ctx Opaque pointer passed back to fn on each read.
-     * @note If neither reader is set, native GPIO (active-low) is used.
-     */
-    void setReadFn(ReadFn fn, void *ctx) noexcept
+    ButtonHandler(const uint8_t (&buttonPins)[N],
+                  ReadResultPinFn readPin,
+                  ButtonTimingConfig timing = {},
+                  bool skipPinInit = true,
+                  TimeFn timeFn = nullptr) noexcept
+        : timing_{timing}, reader_kind_{ReaderKind::PressedResultPin}, read_result_pin_fn_{readPin}, time_fn_{timeFn}
     {
+        initialize_(buttonPins, skipPinInit);
+    }
+
+    /**
+     * @brief Construct with a validity-aware context logical pressed-state callback.
+     */
+    ButtonHandler(const uint8_t (&buttonPins)[N],
+                  ReadResultFn readCb,
+                  void *ctx,
+                  ButtonTimingConfig timing = {},
+                  bool skipPinInit = true,
+                  TimeFn timeFn = nullptr) noexcept
+        : timing_{timing}, reader_kind_{ReaderKind::PressedResultCtx}, read_result_fn_{readCb}, read_ctx_{ctx}, time_fn_{timeFn}
+    {
+        initialize_(buttonPins, skipPinInit);
+    }
+
+    /**
+     * @brief Construct with an electrical-level callback.
+     * @param tag Must be BUTTON_ELECTRICAL_READER; distinguishes electrical HIGH/LOW from logical pressed callbacks.
+     */
+    ButtonHandler(const uint8_t (&buttonPins)[N],
+                  ButtonElectricalReaderTag tag,
+                  LevelReadPinFn readPin,
+                  ButtonTimingConfig timing = {},
+                  bool skipPinInit = true,
+                  TimeFn timeFn = nullptr) noexcept
+        : timing_{timing}, reader_kind_{ReaderKind::ElectricalPin}, level_read_pin_fn_{readPin}, time_fn_{timeFn}
+    {
+        (void)tag;
+        initialize_(buttonPins, skipPinInit);
+    }
+
+    /**
+     * @brief Construct with a context-aware electrical-level callback.
+     */
+    ButtonHandler(const uint8_t (&buttonPins)[N],
+                  ButtonElectricalReaderTag tag,
+                  LevelReadFn readCb,
+                  void *ctx,
+                  ButtonTimingConfig timing = {},
+                  bool skipPinInit = true,
+                  TimeFn timeFn = nullptr) noexcept
+        : timing_{timing}, reader_kind_{ReaderKind::ElectricalCtx}, level_read_fn_{readCb}, read_ctx_{ctx}, time_fn_{timeFn}
+    {
+        (void)tag;
+        initialize_(buttonPins, skipPinInit);
+    }
+
+    /**
+     * @brief Construct with a validity-aware electrical-level callback.
+     */
+    ButtonHandler(const uint8_t (&buttonPins)[N],
+                  ButtonElectricalReaderTag tag,
+                  LevelReadResultPinFn readPin,
+                  ButtonTimingConfig timing = {},
+                  bool skipPinInit = true,
+                  TimeFn timeFn = nullptr) noexcept
+        : timing_{timing}, reader_kind_{ReaderKind::ElectricalResultPin}, level_result_pin_fn_{readPin}, time_fn_{timeFn}
+    {
+        (void)tag;
+        initialize_(buttonPins, skipPinInit);
+    }
+
+    /**
+     * @brief Construct with a validity-aware context electrical-level callback.
+     */
+    ButtonHandler(const uint8_t (&buttonPins)[N],
+                  ButtonElectricalReaderTag tag,
+                  LevelReadResultFn readCb,
+                  void *ctx,
+                  ButtonTimingConfig timing = {},
+                  bool skipPinInit = true,
+                  TimeFn timeFn = nullptr) noexcept
+        : timing_{timing}, reader_kind_{ReaderKind::ElectricalResultCtx}, level_result_fn_{readCb}, read_ctx_{ctx}, time_fn_{timeFn}
+    {
+        (void)tag;
+        initialize_(buttonPins, skipPinInit);
+    }
+
+    // ---- Configuration ---- //
+
+    /**
+     * @brief Replace the reader with a logical pressed-state callback and synchronize without events.
+     * @return True when the new reader was installed and all enabled buttons synchronized successfully.
+     */
+    bool setReadPinFn(ReadPinFn fn) noexcept
+    {
+        const ReaderSnapshot old = readerSnapshot_();
+        reader_kind_ = ReaderKind::PressedPin;
+        read_pin_fn_ = fn;
+        clearOtherReaders_();
+        read_pin_fn_ = fn;
+        if (sync(time_now()))
+            return true;
+        restoreReader_(old);
+        (void)sync(time_now());
+        return false;
+    }
+
+    /**
+     * @brief Replace the reader with a context-aware logical pressed-state callback and synchronize.
+     */
+    bool setReadFn(ReadFn fn, void *ctx) noexcept
+    {
+        const ReaderSnapshot old = readerSnapshot_();
+        clearOtherReaders_();
+        reader_kind_ = ReaderKind::PressedCtx;
         read_fn_ = fn;
         read_ctx_ = ctx;
+        if (sync(time_now()))
+            return true;
+        restoreReader_(old);
+        (void)sync(time_now());
+        return false;
+    }
+
+    /** @brief Install a validity-aware logical pressed-state callback and synchronize. */
+    bool setReadResultPinFn(ReadResultPinFn fn) noexcept
+    {
+        const ReaderSnapshot old = readerSnapshot_();
+        clearOtherReaders_();
+        reader_kind_ = ReaderKind::PressedResultPin;
+        read_result_pin_fn_ = fn;
+        if (sync(time_now()))
+            return true;
+        restoreReader_(old);
+        (void)sync(time_now());
+        return false;
+    }
+
+    /** @brief Install a validity-aware context logical pressed-state callback and synchronize. */
+    bool setReadResultFn(ReadResultFn fn, void *ctx) noexcept
+    {
+        const ReaderSnapshot old = readerSnapshot_();
+        clearOtherReaders_();
+        reader_kind_ = ReaderKind::PressedResultCtx;
+        read_result_fn_ = fn;
+        read_ctx_ = ctx;
+        if (sync(time_now()))
+            return true;
+        restoreReader_(old);
+        (void)sync(time_now());
+        return false;
+    }
+
+    /** @brief Install an electrical-level callback and synchronize. */
+    bool setElectricalReadPinFn(LevelReadPinFn fn) noexcept
+    {
+        const ReaderSnapshot old = readerSnapshot_();
+        clearOtherReaders_();
+        reader_kind_ = ReaderKind::ElectricalPin;
+        level_read_pin_fn_ = fn;
+        if (sync(time_now()))
+            return true;
+        restoreReader_(old);
+        (void)sync(time_now());
+        return false;
+    }
+
+    /** @brief Install a context-aware electrical-level callback and synchronize. */
+    bool setElectricalReadFn(LevelReadFn fn, void *ctx) noexcept
+    {
+        const ReaderSnapshot old = readerSnapshot_();
+        clearOtherReaders_();
+        reader_kind_ = ReaderKind::ElectricalCtx;
+        level_read_fn_ = fn;
+        read_ctx_ = ctx;
+        if (sync(time_now()))
+            return true;
+        restoreReader_(old);
+        (void)sync(time_now());
+        return false;
+    }
+
+    /** @brief Install a validity-aware electrical-level callback and synchronize. */
+    bool setElectricalReadResultPinFn(LevelReadResultPinFn fn) noexcept
+    {
+        const ReaderSnapshot old = readerSnapshot_();
+        clearOtherReaders_();
+        reader_kind_ = ReaderKind::ElectricalResultPin;
+        level_result_pin_fn_ = fn;
+        if (sync(time_now()))
+            return true;
+        restoreReader_(old);
+        (void)sync(time_now());
+        return false;
+    }
+
+    /** @brief Install a validity-aware context electrical-level callback and synchronize. */
+    bool setElectricalReadResultFn(LevelReadResultFn fn, void *ctx) noexcept
+    {
+        const ReaderSnapshot old = readerSnapshot_();
+        clearOtherReaders_();
+        reader_kind_ = ReaderKind::ElectricalResultCtx;
+        level_result_fn_ = fn;
+        read_ctx_ = ctx;
+        if (sync(time_now()))
+            return true;
+        restoreReader_(old);
+        (void)sync(time_now());
+        return false;
     }
 
     /**
-     * @brief Inject a time source (milliseconds).
-     * @param fn Function pointer: uint32_t() returning current time in ms.
-     * @note If nullptr, uses Arduino ::millis() implicitly via time_now() when Arduino is available.
+     * @brief Replace the millisecond time source and rebaseline interaction timers.
+     * @param fn New time source. nullptr uses Arduino millis() when available.
+     * @return True when synchronization in the new time domain succeeded.
      */
-    void setTimeFn(TimeFn fn) noexcept { time_fn_ = fn; }
+    bool setTimeFn(TimeFn fn) noexcept
+    {
+        const TimeFn old = time_fn_;
+        time_fn_ = fn;
+        if (sync(time_now()))
+            return true;
+        time_fn_ = old;
+        (void)sync(time_now());
+        return false;
+    }
 
     /**
-     * @brief Override the global debounce/press-duration timings.
+     * @brief Validate and apply global timings, then synchronize all enabled inputs.
      * @param t New global timing configuration.
-     * @note Per-button overrides (non-zero fields) still take precedence.
+     * @return Detailed validation/synchronization result.
      */
-    void setGlobalTiming(const ButtonTimingConfig &t) noexcept { timing_ = t; }
-
-    /**
-     * @brief Backward-compatible alias for setGlobalTiming().
-     */
-    void setTiming(const ButtonTimingConfig &t) noexcept { setGlobalTiming(t); }
-
-    /**
-     * @brief Apply per-button overrides/flags by numeric index.
-     * @param id Button index [0..N-1].
-     * @param c Overrides (0 => use global for timing fields).
-     * @note If c.enabled is false, debouncer/event state, pending double-click state,
-     *       last duration, latched state, and latch-changed flag are cleared
-     *       (same behavior as enable(id, false)).
-     * @note Silently ignored if id is out of range.
-     */
-    void setPerConfig(uint8_t id, const ButtonPerConfig &c) noexcept
+    ButtonConfigResult setGlobalTiming(const ButtonTimingConfig &t) noexcept
     {
-        if (id < N)
+        ButtonConfigResult result = validateAllWithGlobal_(t);
+        if (!result)
+            return result;
+
+        const ButtonTimingConfig old = timing_;
+        const bool old_config_valid = config_valid_;
+        const ButtonConfigError old_config_error = config_error_;
+        timing_ = t;
+        config_valid_ = true;
+        config_error_ = ButtonConfigError::None;
+        if (!sync(time_now()))
         {
-            const bool was_enabled = per_[id].enabled;
-            per_[id] = c;
-
-            // Keep behavior consistent with enable(id, false): disabling clears runtime state.
-            if (was_enabled && !per_[id].enabled)
-                resetButton_(static_cast<size_t>(id), time_now());
-
-            // For enabled buttons, latched state is preserved at runtime.
-            // latch_initial is only applied on reset() (and at construction).
+            timing_ = old;
+            config_valid_ = old_config_valid;
+            config_error_ = old_config_error;
+            (void)sync(time_now());
+            return ButtonConfigResult{false, ButtonConfigError::SynchronizationFailed, 0xFFu};
         }
+        return ButtonConfigResult{true, ButtonConfigError::None, 0xFFu};
     }
 
+    /** @brief Backward-compatible alias for setGlobalTiming(). */
+    ButtonConfigResult setTiming(const ButtonTimingConfig &t) noexcept { return setGlobalTiming(t); }
+
     /**
-     * @brief Enable/disable a button at runtime.
-     * @param id Button index [0..N-1].
-     * @param en true to enable; false to disable.
-     * @note Disabling clears debouncer/event state, pending double-click state,
-     *       last duration, latched state, and latch-changed flag for this button.
-     * @note Silently ignored if id is out of range.
+     * @brief Validate and apply per-button configuration.
+     * @param id Button index.
+     * @param c New per-button configuration.
+     * @return Detailed validation/synchronization result.
      */
-    void enable(uint8_t id, bool en) noexcept
+    ButtonConfigResult setPerConfig(uint8_t id, const ButtonPerConfig &c) noexcept
     {
-        if (id < N)
+        if (id >= N)
+            return ButtonConfigResult{false, ButtonConfigError::InvalidButton, id};
+
+        const ButtonConfigResult validation = validateResolved_(timing_, c, id);
+        if (!validation)
+            return validation;
+
+        const ButtonPerConfig old = per_[id];
+        per_[id] = c;
+
+        if (!c.enabled)
         {
-            per_[id].enabled = en;
-            if (!en)
-            {
-                resetButton_(static_cast<size_t>(id), time_now());
-            }
+            resetDisabledButton_(id, time_now());
+            return ButtonConfigResult{true, ButtonConfigError::None, id};
         }
+
+        if (!syncButton_(id, time_now()))
+        {
+            per_[id] = old;
+            (void)syncButton_(id, time_now());
+            return ButtonConfigResult{false, ButtonConfigError::SynchronizationFailed, id};
+        }
+
+        return ButtonConfigResult{true, ButtonConfigError::None, id};
     }
 
     /**
-     * @brief Set active level (polarity) for a button at runtime.
-     * @param id Button index [0..N-1].
-     * @param activeLow true => LOW is pressed; false => HIGH is pressed.
-     * @note Silently ignored if id is out of range.
+     * @brief Enable or disable one button.
+     * @param id Button index.
+     * @param en Desired enable state.
+     * @return Configuration/synchronization result.
      */
-    void setActiveLow(uint8_t id, bool activeLow) noexcept
+    ButtonConfigResult enable(uint8_t id, bool en) noexcept
     {
-        if (id < N)
-            per_[id].active_low = activeLow;
+        if (id >= N)
+            return ButtonConfigResult{false, ButtonConfigError::InvalidButton, id};
+
+        if (per_[id].enabled == en)
+            return ButtonConfigResult{true, ButtonConfigError::None, id};
+
+        if (!en)
+        {
+            per_[id].enabled = false;
+            resetDisabledButton_(id, time_now());
+            return ButtonConfigResult{true, ButtonConfigError::None, id};
+        }
+
+        per_[id].enabled = true;
+        if (!syncButton_(id, time_now()))
+        {
+            per_[id].enabled = false;
+            resetDisabledButton_(id, time_now());
+            return ButtonConfigResult{false, ButtonConfigError::SynchronizationFailed, id};
+        }
+        return ButtonConfigResult{true, ButtonConfigError::None, id};
     }
 
     /**
-     * @brief Enum-friendly overload of setPerConfig().
-     * @tparam E  Enum type (e.g., ButtonIndex) with underlying uint8_t.
-     * @param e Enumerated button identifier.
-     * @param c Per-button overrides (0 => use global for timing fields).
-     * @note Inlines to the uint8_t overload; avoids casts at call sites.
+     * @brief Change electrical polarity and rebaseline without synthetic edges.
+     * @param id Button index.
+     * @param activeLow True when LOW means pressed for native/electrical readers.
+     * @return Configuration/synchronization result.
+     * @note Logical pressed-state callbacks are already polarity-corrected; this setting has no effect on them.
      */
+    ButtonConfigResult setActiveLow(uint8_t id, bool activeLow) noexcept
+    {
+        if (id >= N)
+            return ButtonConfigResult{false, ButtonConfigError::InvalidButton, id};
+
+        const bool old = per_[id].active_low;
+        per_[id].active_low = activeLow;
+
+        // Logical readers already return the final pressed state, so polarity
+        // metadata has no effect and should not disturb an in-progress interaction.
+        if (!readerUsesElectricalPolarity_())
+            return ButtonConfigResult{true, ButtonConfigError::None, id};
+
+        if (per_[id].enabled && !syncButton_(id, time_now()))
+        {
+            per_[id].active_low = old;
+            (void)syncButton_(id, time_now());
+            return ButtonConfigResult{false, ButtonConfigError::SynchronizationFailed, id};
+        }
+        return ButtonConfigResult{true, ButtonConfigError::None, id};
+    }
+
+    // ---- Enum-friendly configuration ---- //
+
     template <typename E, UB::compat::enable_if_t<UB::compat::is_enum<E>::value, int> = 0>
-    void setPerConfig(E e, const ButtonPerConfig &c) noexcept
+    ButtonConfigResult setPerConfig(E e, const ButtonPerConfig &c) noexcept
     {
-        setPerConfig(static_cast<uint8_t>(e), c);
+        return setPerConfig(static_cast<uint8_t>(e), c);
     }
 
-    /**
-     * @brief Enum-friendly overload of enable().
-     * @tparam E Enum type (e.g., ButtonIndex) with underlying uint8_t.
-     * @param e Enumerated button identifier.
-     * @param en true to enable; false to disable.
-     * @note Inlines to the uint8_t overload; avoids casts at call sites.
-     */
     template <typename E, UB::compat::enable_if_t<UB::compat::is_enum<E>::value, int> = 0>
-    void enable(E e, bool en) noexcept
+    ButtonConfigResult enable(E e, bool en) noexcept
     {
-        enable(static_cast<uint8_t>(e), en);
+        return enable(static_cast<uint8_t>(e), en);
     }
 
-    /**
-     * @brief Enum-friendly overload of setActiveLow().
-     * @tparam E Enum type (e.g., ButtonIndex) with underlying uint8_t.
-     * @param e Enumerated button identifier.
-     * @param activeLow true => LOW is pressed; false => HIGH is pressed.
-     * @note Inlines to the uint8_t overload; avoids casts at call sites.
-     */
     template <typename E, UB::compat::enable_if_t<UB::compat::is_enum<E>::value, int> = 0>
-    void setActiveLow(E e, bool activeLow) noexcept
+    ButtonConfigResult setActiveLow(E e, bool activeLow) noexcept
     {
-        setActiveLow(static_cast<uint8_t>(e), activeLow);
+        return setActiveLow(static_cast<uint8_t>(e), activeLow);
     }
 
-    // ---- IButtonHandler overrides (core per-button API) ---- //
+    // ---- State and update ---- //
+
+    /** @brief Number of logical buttons managed by this handler. */
+    UB_NODISCARD uint8_t size() const noexcept override { return static_cast<uint8_t>(N); }
+
+    /** @brief Compile-time number of logical buttons. */
+    UB_NODISCARD static constexpr uint8_t sizeStatic() noexcept { return static_cast<uint8_t>(N); }
 
     /**
-     * @brief Number of logical buttons handled by this instance.
-     * @return Compile-time constant (N) as uint8_t.
-     */
-    [[nodiscard]] uint8_t size() const noexcept override { return static_cast<uint8_t>(N); }
-
-    /**
-     * @brief Compile-time number of logical buttons.
-     * @return N as uint8_t.
-     */
-    [[nodiscard]] static constexpr uint8_t sizeStatic() noexcept { return static_cast<uint8_t>(N); }
-
-    /**
-     * @brief Iterate all debounced button states.
-     * @tparam F Callable with signature f(uint8_t index, bool pressed).
-     * @param f Callback invoked once per button.
+     * @brief Iterate current debounced button levels.
+     * @tparam F Callable accepting `(uint8_t index, bool pressed)`.
      */
     template <typename F>
     void forEach(F &&f) const noexcept
@@ -328,499 +535,1012 @@ public:
             f(static_cast<uint8_t>(i), last_state_[i]);
     }
 
-    /**
-     * @brief Scan and process button states using the configured time source.
-     */
+    /** @brief Acquire/process all enabled buttons using the configured time source. */
     void update() noexcept override { update(time_now()); }
 
     /**
-     * @brief Scan and process button states using a provided timestamp.
-     * @param now Millisecond timestamp to use (e.g., from xTaskGetTickCount in RTOS).
+     * @brief Acquire/process all enabled buttons using an explicit millisecond timestamp.
+     * @param now Current time in milliseconds. Unsigned subtraction preserves millis() wraparound behavior.
      */
     void update(uint32_t now) noexcept override
     {
+        if (!config_valid_)
+            return;
+
         for (size_t i = 0; i < N; ++i)
         {
-            // Skip disabled buttons entirely.
             if (!per_[i].enabled)
                 continue;
 
-            // Resolve timing with per-button overrides (0 => fall back to global).
-            const uint32_t dms = per_[i].debounce_ms ? static_cast<uint32_t>(per_[i].debounce_ms) : timing_.debounce_ms;
-            const uint32_t sms = per_[i].short_press_ms ? static_cast<uint32_t>(per_[i].short_press_ms) : timing_.short_press_ms;
-            const uint32_t lms = per_[i].long_press_ms ? static_cast<uint32_t>(per_[i].long_press_ms) : timing_.long_press_ms;
-            const uint32_t dcms = per_[i].double_click_ms ? static_cast<uint32_t>(per_[i].double_click_ms) : timing_.double_click_ms;
+            const ButtonPressedResult sample = acquire_(i);
+            attempt_ms_[i] = now;
 
-            // Read raw physical level: prefer fast per-pin fn, else ctx-callback, else native.
-            const bool pressed_default =
-                (read_pin_fn_) ? read_pin_fn_(pins_[i])
-                               : (read_fn_ ? read_fn_(read_ctx_, pins_[i]) : readNative_(pins_[i], per_[i].active_low));
-
-            // Apply active level (default: active-low => pressed when LOW).
-            const bool raw = per_[i].active_low ? pressed_default : !pressed_default;
-
-            // Debounce: restart window on any raw edge.
-            if (raw != last_state_read_[i])
+            if (!sample.valid)
             {
-                last_state_read_[i] = raw;
-                last_state_change_[i] = now;
+                recordFailure_(i, normalizeReadError_(sample.error), now);
+                continue;
             }
 
-            // If raw has been stable long enough and differs from committed, commit it.
-            if ((now - last_state_change_[i]) >= dms && last_state_[i] != last_state_read_[i])
+            recordSuccess_(i, now);
+
+            // A hardware observation gap makes the interaction history ambiguous.
+            // Rebaseline this button without emitting synthetic edges/events.
+            if (acquisition_gap_[i])
+            {
+                synchronizeFromSample_(i, sample.pressed, now);
+                continue;
+            }
+
+            const ResolvedTiming t = resolvedTiming_(timing_, per_[i]);
+
+            // If a previous short can no longer become a double, finalize it
+            // before processing a newer interaction at this timestamp.
+            if (pending_short_[i] && (now - pending_since_[i]) > t.double_click_ms)
+            {
+                finalizeInteraction_(i, ButtonPressType::Short, ButtonEventType::Short, now, pending_duration_[i]);
+                pending_short_[i] = false;
+            }
+
+            // Debounce: restart the candidate timer whenever the observed logical level changes.
+            if (sample.pressed != last_state_read_[i])
+            {
+                last_state_read_[i] = sample.pressed;
+                last_state_change_ms_[i] = now;
+            }
+
+            // Commit a level only after the candidate has remained continuously stable.
+            if (last_state_[i] != last_state_read_[i] && (now - last_state_change_ms_[i]) >= t.debounce_ms)
             {
                 last_state_[i] = last_state_read_[i];
+                ++change_sequence_[i];
 
                 if (last_state_[i])
                 {
-                    // Transition: released -> pressed (commit).
-                    press_start_[i] = now;
+                    press_start_ms_[i] = now;
                     has_press_start_[i] = true;
+                    long_started_[i] = false;
+                    suppress_until_release_[i] = false;
                 }
                 else
                 {
-                    // Transition: pressed -> released (commit).
-                    const uint32_t duration = has_press_start_[i] ? (now - press_start_[i]) : 0U;
-                    last_duration_[i] = duration; ///< Record exact duration for retrieval.
-
-                    if (duration >= lms)
-                    {
-                        event_[i] = ButtonPressType::Long;
-
-                        // Finalized event => apply latch now (if configured).
-                        applyLatch_(i, event_[i]);
-                    }
-                    else if (duration >= sms)
-                    {
-                        // Short press: either completes a double or starts a pending single.
-                        if (pending_short_[i] && (now - pending_since_[i]) <= dcms)
-                        {
-                            event_[i] = ButtonPressType::Double;
-                            pending_short_[i] = false;
-
-                            // Finalized event => apply latch now (if configured).
-                            applyLatch_(i, event_[i]);
-                        }
-                        else
-                        {
-                            // Defer emitting Short; it will fire if no 2nd press arrives within dcms.
-                            pending_short_[i] = true;
-                            pending_since_[i] = now;
-                            // No finalized event yet => do not apply latch here.
-                        }
-                    }
-                    else
-                    {
-                        event_[i] = ButtonPressType::None;
-                    }
-
-                    press_start_[i] = 0;
-                    has_press_start_[i] = false;
+                    processRelease_(i, now, t);
                 }
             }
 
-            // Flush pending single-click ONLY when both raw and debounced state are released.
-            // This prevents a "pending Short" from firing while a second press is already in progress
-            // but still inside the debounce window.
-            if (pending_short_[i] && event_[i] == ButtonPressType::None)
+            // LongStarted is a threshold event while the stable level is still held.
+            if (last_state_[i] && has_press_start_[i] && !long_started_[i] &&
+                (now - press_start_ms_[i]) >= t.long_press_ms)
             {
-                const uint32_t dt = now - pending_since_[i];
-                if (!last_state_[i] && !last_state_read_[i] && (dt >= dcms))
-                {
-                    event_[i] = ButtonPressType::Short;
-                    pending_short_[i] = false;
+                long_started_[i] = true;
+                pushEvent_(static_cast<uint8_t>(i), ButtonEventType::LongStarted, now,
+                           now - press_start_ms_[i]);
+            }
 
-                    // Finalized event => apply latch now (if configured).
-                    applyLatch_(i, event_[i]);
-                }
+            // A pending short is safe to finalize once the complete double-click
+            // window has expired and no release at this timestamp completed a double.
+            if (pending_short_[i] && (now - pending_since_[i]) > t.double_click_ms)
+            {
+                finalizeInteraction_(i, ButtonPressType::Short, ButtonEventType::Short, now, pending_duration_[i]);
+                pending_short_[i] = false;
             }
         }
     }
 
-    /**
-     * @brief Get debounced state of a button.
-     * @param buttonId Index of button.
-     * @return true if the button is currently pressed (committed/debounced).
-     */
-    [[nodiscard]] bool isPressed(uint8_t buttonId) const noexcept override
+    /** @brief Current debounced logical pressed state. */
+    UB_NODISCARD bool isPressed(uint8_t buttonId) const noexcept override
     {
         return (buttonId < N) ? last_state_[buttonId] : false;
     }
 
     /**
-     * @brief Get and consume the press event type for a button.
-     * @param buttonId Index of button.
-     * @return ButtonPressType::Short, ::Long, ::Double, or ::None if no new event.
+     * @brief True once the long threshold has been reached while the button remains held.
+     * @note Use this level for hold-to-enable behavior rather than a one-shot event.
+     */
+    UB_NODISCARD bool isLongHeld(uint8_t buttonId) const noexcept
+    {
+        return (buttonId < N) ? (last_state_[buttonId] && long_started_[buttonId]) : false;
+    }
+
+    // ---- Detailed event queue ---- //
+
+    /**
+     * @brief Pop the oldest detailed event across all buttons.
+     * @param out Receives the event on success; remains unchanged when the queue is empty.
+     * @return True when an event was returned.
+     */
+    bool popEvent(ButtonEvent &out) noexcept
+    {
+        if (event_count_ == 0u)
+            return false;
+        out = event_queue_[0];
+        removeEventAt_(0u);
+        return true;
+    }
+
+    /** @brief Peek at the oldest detailed event without consuming it. */
+    UB_NODISCARD bool peekEvent(ButtonEvent &out) const noexcept
+    {
+        if (event_count_ == 0u)
+            return false;
+        out = event_queue_[0];
+        return true;
+    }
+
+    /** @brief Number of detailed events currently waiting in the bounded queue. */
+    UB_NODISCARD uint8_t pendingEventCount() const noexcept { return event_count_; }
+
+    /** @brief Monotonic count of detailed events generated, including any dropped because the queue was full. */
+    UB_NODISCARD uint32_t eventSequence() const noexcept { return event_sequence_; }
+
+    /** @brief Number of detailed events dropped because the bounded queue was full. */
+    UB_NODISCARD uint32_t droppedEventCount() const noexcept { return dropped_events_; }
+
+    /** @brief True when at least one event has been dropped since the flag was cleared. */
+    UB_NODISCARD bool eventOverflowed() const noexcept { return event_overflow_; }
+
+    /** @brief Clear the sticky overflow indication without altering the dropped-event counter. */
+    void clearEventOverflow() noexcept { event_overflow_ = false; }
+
+    // ---- Legacy completed-interaction API ---- //
+
+    /**
+     * @brief Get and consume the oldest completed interaction for one button.
+     * @return Short, Long, Double, or None.
+     * @note LongStarted records for this button are consumed/ignored by the legacy API.
+     *       Do not mix popEvent() and getPressType() as independent consumers of the same queue.
      */
     ButtonPressType getPressType(uint8_t buttonId) noexcept override
     {
         if (buttonId >= N)
             return ButtonPressType::None;
-        const ButtonPressType e = event_[buttonId];
-        event_[buttonId] = ButtonPressType::None; // consume
-        return e;
+
+        uint8_t i = 0u;
+        while (i < event_count_)
+        {
+            const ButtonEvent &evt = event_queue_[i];
+            if (evt.button_id != buttonId)
+            {
+                ++i;
+                continue;
+            }
+
+            if (evt.type == ButtonEventType::LongStarted)
+            {
+                removeEventAt_(i);
+                continue;
+            }
+
+            const ButtonPressType mapped = toPressType_(evt.type);
+            removeEventAt_(i);
+            return mapped;
+        }
+        return ButtonPressType::None;
     }
 
-    /**
-     * @brief Peek at the pending press event without consuming it.
-     * @param buttonId Index of button.
-     * @return ButtonPressType::Short, ::Long, ::Double, or ::None if no event is waiting.
-     * @note Useful when one part of an application needs to observe an event
-     *       before another part consumes it with getPressType().
-     */
-    [[nodiscard]] ButtonPressType peekPressType(uint8_t buttonId) const noexcept override
+    /** @brief Peek at the oldest completed interaction for one button without consuming it. */
+    UB_NODISCARD ButtonPressType peekPressType(uint8_t buttonId) const noexcept override
     {
-        return (buttonId < N) ? event_[buttonId] : ButtonPressType::None;
+        if (buttonId >= N)
+            return ButtonPressType::None;
+        for (uint8_t i = 0u; i < event_count_; ++i)
+        {
+            const ButtonEvent &evt = event_queue_[i];
+            if (evt.button_id == buttonId && evt.type != ButtonEventType::LongStarted)
+                return toPressType_(evt.type);
+        }
+        return ButtonPressType::None;
     }
 
-    /**
-     * @brief Exact duration (ms) of the most recent completed press (on release).
-     * @param buttonId Index of button.
-     * @return Milliseconds of the most recent *completed* press for buttonId.
-     * @note Non-consuming: value persists until the next completed press or reset().
-     */
-    [[nodiscard]] uint32_t getLastPressDuration(uint8_t buttonId) const noexcept override
+    /** @brief Exact observed duration of the most recent completed press. */
+    UB_NODISCARD uint32_t getLastPressDuration(uint8_t buttonId) const noexcept override
     {
-        return (buttonId < N) ? last_duration_[buttonId] : 0U;
+        return (buttonId < N) ? last_duration_ms_[buttonId] : 0u;
+    }
+
+    // ---- Input health/freshness ---- //
+
+    /** @brief True when a valid timing configuration and usable reader are installed. */
+    UB_NODISCARD bool configured() const noexcept { return config_valid_ && readerConfigured_(); }
+
+    /** @brief Constructor/global timing validation error, or None when the active timing is valid. */
+    UB_NODISCARD ButtonConfigError configError() const noexcept { return config_error_; }
+
+    /** @brief True when every enabled button's most recent acquisition succeeded. */
+    UB_NODISCARD bool valid() const noexcept
+    {
+        if (!configured())
+            return false;
+        for (size_t i = 0; i < N; ++i)
+            if (per_[i].enabled && !valid_[i])
+                return false;
+        return true;
+    }
+
+    /** @brief True when every enabled button has at least one successful acquisition. */
+    UB_NODISCARD bool hasSample() const noexcept
+    {
+        bool any = false;
+        for (size_t i = 0; i < N; ++i)
+        {
+            if (!per_[i].enabled)
+                continue;
+            any = true;
+            if (!has_sample_[i])
+                return false;
+        }
+        return any;
+    }
+
+    /** @brief Per-button current acquisition validity. */
+    UB_NODISCARD bool valid(uint8_t buttonId) const noexcept { return (buttonId < N) ? valid_[buttonId] : false; }
+
+    /** @brief Per-button successful-sample presence. */
+    UB_NODISCARD bool hasSample(uint8_t buttonId) const noexcept { return (buttonId < N) ? has_sample_[buttonId] : false; }
+
+    /** @brief Timestamp of the last successful acquisition for one button. */
+    UB_NODISCARD uint32_t sampleMs(uint8_t buttonId) const noexcept { return (buttonId < N) ? sample_ms_[buttonId] : 0u; }
+
+    /** @brief Successful acquisition sequence for one button. */
+    UB_NODISCARD uint32_t sequence(uint8_t buttonId) const noexcept { return (buttonId < N) ? sample_sequence_[buttonId] : 0u; }
+
+    /** @brief Debounced level-transition sequence for one button. */
+    UB_NODISCARD uint32_t changeSequence(uint8_t buttonId) const noexcept { return (buttonId < N) ? change_sequence_[buttonId] : 0u; }
+
+    /** @brief Edge-free synchronization generation for one button. */
+    UB_NODISCARD uint32_t generation(uint8_t buttonId) const noexcept { return (buttonId < N) ? generation_[buttonId] : 0u; }
+
+    /** @brief Snapshot of per-button acquisition/state metadata. */
+    UB_NODISCARD ButtonInputStatus inputStatus(uint8_t buttonId) const noexcept
+    {
+        ButtonInputStatus s{};
+        if (buttonId >= N)
+            return s;
+        s.enabled = per_[buttonId].enabled;
+        s.valid = valid_[buttonId];
+        s.has_sample = has_sample_[buttonId];
+        s.pressed = last_state_[buttonId];
+        s.long_held = isLongHeld(buttonId);
+        s.last_error = last_error_[buttonId];
+        s.sample_ms = sample_ms_[buttonId];
+        s.attempt_ms = attempt_ms_[buttonId];
+        s.error_ms = error_ms_[buttonId];
+        s.sample_sequence = sample_sequence_[buttonId];
+        s.change_sequence = change_sequence_[buttonId];
+        s.generation = generation_[buttonId];
+        s.latch_change_sequence = latch_change_sequence_[buttonId];
+        return s;
+    }
+
+    /** @brief Snapshot of handler-wide configuration, health, and event-loss metadata. */
+    UB_NODISCARD ButtonHandlerStatus status() const noexcept
+    {
+        ButtonHandlerStatus s{};
+        s.configured = configured();
+        s.valid = valid();
+        s.has_sample = hasSample();
+        s.event_overflow = event_overflow_;
+        s.config_error = config_error_;
+        s.event_sequence = event_sequence_;
+        s.dropped_events = dropped_events_;
+        return s;
+    }
+
+    // ---- Synchronization/reset ---- //
+
+    /**
+     * @brief Establish current physical levels as an edge-free baseline.
+     * @return True when every enabled button was acquired successfully.
+     * @note Existing completed events and latch states are retained.
+     */
+    bool sync() noexcept { return sync(time_now()); }
+
+    /** @brief Timestamped form of sync(). */
+    bool sync(uint32_t now) noexcept
+    {
+        if (!config_valid_ || !readerConfigured_())
+        {
+            markAllMissingReader_(now);
+            return false;
+        }
+
+        ButtonPressedResult samples[N];
+        bool ok = true;
+        for (size_t i = 0; i < N; ++i)
+        {
+            if (!per_[i].enabled)
+            {
+                samples[i] = ButtonPressedResult::success(false);
+                continue;
+            }
+            samples[i] = acquire_(i);
+            if (!samples[i].valid)
+                ok = false;
+        }
+
+        if (!ok)
+        {
+            for (size_t i = 0; i < N; ++i)
+            {
+                if (!per_[i].enabled)
+                    continue;
+                attempt_ms_[i] = now;
+                if (!samples[i].valid)
+                    recordFailure_(i, normalizeReadError_(samples[i].error), now);
+            }
+            return false;
+        }
+
+        for (size_t i = 0; i < N; ++i)
+        {
+            if (!per_[i].enabled)
+                continue;
+            attempt_ms_[i] = now;
+            recordSuccess_(i, now);
+            synchronizeFromSample_(i, samples[i].pressed, now);
+        }
+        return true;
+    }
+
+    /** @brief Explicit name for the safe runtime reconfiguration baseline operation. */
+    bool reconfigureAndSync() noexcept { return sync(); }
+
+    /**
+     * @brief Mark all enabled inputs invalid when source health is known outside the reader callback.
+     * @param error Failure reason to expose in inputStatus().
+     * @note Stable levels are retained, interaction classification is cancelled, and the
+     *       next successful update rebaselines each button without synthetic events.
+     */
+    void invalidate(ButtonReadError error = ButtonReadError::AcquisitionFailed) noexcept
+    {
+        const uint32_t now = time_now();
+        const ButtonReadError normalized = normalizeReadError_(error);
+        for (size_t i = 0; i < N; ++i)
+        {
+            if (!per_[i].enabled)
+                continue;
+            attempt_ms_[i] = now;
+            recordFailure_(i, normalized, now);
+        }
     }
 
     /**
-     * @brief Query the current latched state for a button.
-     * @param buttonId Index of button.
-     * @return true if latched ON; false otherwise.
+     * @brief Mark one input invalid when source health is known outside the reader callback.
+     * @param buttonId Button index.
+     * @param error Failure reason to expose in inputStatus().
      */
-    [[nodiscard]] bool isLatched(uint8_t buttonId) const noexcept override
+    void invalidate(uint8_t buttonId, ButtonReadError error = ButtonReadError::AcquisitionFailed) noexcept
+    {
+        if (buttonId >= N || !per_[buttonId].enabled)
+            return;
+        const uint32_t now = time_now();
+        attempt_ms_[buttonId] = now;
+        recordFailure_(buttonId, normalizeReadError_(error), now);
+    }
+
+    /**
+     * @brief Clear queued interactions/runtime state, restore initial latch values, and synchronize current levels.
+     * @return True when the new baseline was acquired successfully.
+     */
+    bool resetAndSync() noexcept
+    {
+        const uint32_t now = time_now();
+        clearEventQueue_();
+        for (size_t i = 0; i < N; ++i)
+            resetRuntime_(i, now, true);
+        return sync(now);
+    }
+
+    /**
+     * @brief Reset and synchronize current physical levels.
+     * @note v2 no longer resets every button to an assumed released state.
+     */
+    void reset() noexcept override { (void)resetAndSync(); }
+
+    // ---- Latching ---- //
+
+    UB_NODISCARD bool isLatched(uint8_t buttonId) const noexcept override
     {
         return (buttonId < N) ? latched_.test(buttonId) : false;
     }
 
-    /**
-     * @brief Force the latched state for a button.
-     * @param id Button index [0..N-1].
-     * @param on Desired latched state (true = ON, false = OFF).
-     */
     void setLatched(uint8_t id, bool on) noexcept override
     {
         if (id >= N)
             return;
-
-        const bool was = latched_.test(id);
-        if (was == on)
+        const bool before = latched_.test(id);
+        if (before == on)
             return;
-
         latched_.set(id, on);
         latched_changed_.set(id, true);
+        ++latch_change_sequence_[id];
     }
 
-    /**
-     * @brief Force the latched state for a button (enum-friendly overload).
-     * @tparam E Any enum type convertible to a button index.
-     * @param b Button index enum value (e.g., ButtonIndex or a local enum class).
-     * @param on Desired latched state (true = ON, false = OFF).
-     */
-    template <typename E, UB::compat::enable_if_t<UB::compat::is_enum<E>::value, int> = 0>
-    void setLatched(E b, bool on) noexcept
-    {
-        setLatched(static_cast<uint8_t>(b), on);
-    }
-
-    /**
-     * @brief Clear all latched states.
-     */
     void clearAllLatched() noexcept override
     {
         for (size_t i = 0; i < N; ++i)
-        {
             if (latched_.test(i))
-            {
-                latched_.set(i, false);
-                latched_changed_.set(i, true);
-            }
-        }
+                setLatched(static_cast<uint8_t>(i), false);
     }
 
-    /**
-     * @brief Clear a subset of latched states using a bitmask.
-     * @param mask Bitmask of button indices to clear (bit0 = button 0, etc.; buttons 0..31 only).
-     */
     void clearLatchedMask(uint32_t mask) noexcept override
     {
-        for (size_t i = 0; i < N && i < 32; ++i)
-        {
-            if ((mask & (1u << i)) != 0u && latched_.test(i))
-            {
-                latched_.set(i, false);
-                latched_changed_.set(i, true);
-            }
-        }
+        const size_t n = (N < 32u) ? N : 32u;
+        for (size_t i = 0; i < n; ++i)
+            if ((mask & (static_cast<uint32_t>(1u) << i)) != 0u && latched_.test(i))
+                setLatched(static_cast<uint8_t>(i), false);
     }
 
-    /**
-     * @brief Build a 32-bit latched mask.
-     * @return Bitmask where bit i is set when button i is latched ON (up to 32 buttons).
-     * @note ButtonHandler<N> supports up to 255 buttons, but this helper only reports buttons 0..31.
-     */
-    [[nodiscard]] uint32_t latchedMask() const noexcept override
+    UB_NODISCARD uint32_t latchedMask() const noexcept override
     {
-        uint32_t m = 0U;
-        const uint8_t n = static_cast<uint8_t>((N < 32) ? N : 32);
-        for (uint8_t i = 0; i < n; ++i)
-        {
+        uint32_t mask = 0u;
+        const size_t n = (N < 32u) ? N : 32u;
+        for (size_t i = 0; i < n; ++i)
             if (latched_.test(i))
-                m |= (1u << i);
-        }
-        return m;
+                mask |= (static_cast<uint32_t>(1u) << i);
+        return mask;
     }
 
-    /**
-     * @brief Edge flag for latching: true if latched state changed since the last clear.
-     * @param buttonId Index of button.
-     * @return true if the latched state changed since the previous call (and clears the flag).
-     */
     bool getAndClearLatchedChanged(uint8_t buttonId) noexcept override
     {
         if (buttonId >= N)
             return false;
-        const bool v = latched_changed_.test(buttonId);
+        const bool changed = latched_changed_.test(buttonId);
         latched_changed_.set(buttonId, false);
-        return v;
+        return changed;
     }
 
-    /**
-     * @brief Clear all pending events and re-initialize debounced state.
-     */
-    void reset() noexcept override
+    /** @brief Durable latched-state transition sequence for one button. */
+    UB_NODISCARD uint32_t latchChangeSequence(uint8_t buttonId) const noexcept
     {
-        const uint32_t t0 = time_now();
-        for (size_t i = 0; i < N; ++i)
-        {
-            last_state_[i] = false;      ///< Committed (debounced).
-            last_state_read_[i] = false; ///< Last raw (post-polarity) state.
-            last_state_change_[i] = t0;  ///< Restart debounce window.
-            press_start_[i] = 0;
-            has_press_start_[i] = false;
-            event_[i] = ButtonPressType::None;
-            last_duration_[i] = 0;
-            pending_short_[i] = false;
-            pending_since_[i] = 0;
-            latched_.set(i, per_[i].latch_initial);
-            latched_changed_.set(i, false);
-        }
+        return (buttonId < N) ? latch_change_sequence_[buttonId] : 0u;
     }
 
-    // ---- Enum-friendly overloads (no cast needed in sketches) ---- //
+    // ---- Enum-friendly state/latching ---- //
 
-    /**
-     * @brief Enum-friendly overload of isPressed().
-     * @tparam E Enum type (must satisfy std::is_enum<E>::value).
-     * @param buttonId Enumerated button identifier.
-     * @return true if the debounced state is pressed; false otherwise.
-     */
     template <typename E, UB::compat::enable_if_t<UB::compat::is_enum<E>::value, int> = 0>
-    [[nodiscard]] bool isPressed(E buttonId) const noexcept
-    {
-        return isPressed(static_cast<uint8_t>(buttonId));
-    }
+    UB_NODISCARD bool isPressed(E id) const noexcept { return isPressed(static_cast<uint8_t>(id)); }
 
-    /**
-     * @brief Enum-friendly overload of getPressType().
-     * @tparam E Enum type (must satisfy std::is_enum<E>::value).
-     * @param buttonId Enumerated button identifier.
-     * @return ButtonPressType event: Short, Long, or None.
-     */
     template <typename E, UB::compat::enable_if_t<UB::compat::is_enum<E>::value, int> = 0>
-    ButtonPressType getPressType(E buttonId) noexcept
-    {
-        return getPressType(static_cast<uint8_t>(buttonId));
-    }
+    UB_NODISCARD bool isLongHeld(E id) const noexcept { return isLongHeld(static_cast<uint8_t>(id)); }
 
-    /**
-     * @brief Enum-friendly overload of peekPressType().
-     * @tparam E Enum type (must satisfy std::is_enum<E>::value).
-     * @param buttonId Enumerated button identifier.
-     * @return Pending ButtonPressType event without consuming it.
-     */
     template <typename E, UB::compat::enable_if_t<UB::compat::is_enum<E>::value, int> = 0>
-    [[nodiscard]] ButtonPressType peekPressType(E buttonId) const noexcept
-    {
-        return peekPressType(static_cast<uint8_t>(buttonId));
-    }
+    ButtonPressType getPressType(E id) noexcept { return getPressType(static_cast<uint8_t>(id)); }
 
-    /**
-     * @brief Enum-friendly wrapper for querying the exact duration (ms) of the last completed press.
-     * @tparam E Enum type (must satisfy std::is_enum<E>::value).
-     * @param buttonId Enumerated button identifier.
-     * @return Milliseconds of the most recent *completed* press for buttonId.
-     *         Returns 0 if no press has been recorded yet or if buttonId is out of range.
-     */
     template <typename E, UB::compat::enable_if_t<UB::compat::is_enum<E>::value, int> = 0>
-    [[nodiscard]] uint32_t getLastPressDuration(E buttonId) const noexcept
-    {
-        return getLastPressDuration(static_cast<uint8_t>(buttonId));
-    }
+    UB_NODISCARD ButtonPressType peekPressType(E id) const noexcept { return peekPressType(static_cast<uint8_t>(id)); }
 
-    /**
-     * @brief Enum-friendly overload of isLatched().
-     * @tparam E Enum type (must satisfy std::is_enum<E>::value).
-     * @param buttonId Enumerated button identifier.
-     * @return true if latched ON; false otherwise.
-     */
     template <typename E, UB::compat::enable_if_t<UB::compat::is_enum<E>::value, int> = 0>
-    [[nodiscard]] bool isLatched(E buttonId) const noexcept
-    {
-        return isLatched(static_cast<uint8_t>(buttonId));
-    }
+    UB_NODISCARD uint32_t getLastPressDuration(E id) const noexcept { return getLastPressDuration(static_cast<uint8_t>(id)); }
 
-    /**
-     * @brief Enum-friendly overload of getAndClearLatchedChanged().
-     * @tparam E Enum type (must satisfy std::is_enum<E>::value).
-     * @param buttonId Enumerated button identifier.
-     * @return true if the latched state changed since the previous call (and clears the flag).
-     */
     template <typename E, UB::compat::enable_if_t<UB::compat::is_enum<E>::value, int> = 0>
-    bool getAndClearLatchedChanged(E buttonId) noexcept
-    {
-        return getAndClearLatchedChanged(static_cast<uint8_t>(buttonId));
-    }
+    UB_NODISCARD bool isLatched(E id) const noexcept { return isLatched(static_cast<uint8_t>(id)); }
+
+    template <typename E, UB::compat::enable_if_t<UB::compat::is_enum<E>::value, int> = 0>
+    void setLatched(E id, bool on) noexcept { setLatched(static_cast<uint8_t>(id), on); }
+
+    template <typename E, UB::compat::enable_if_t<UB::compat::is_enum<E>::value, int> = 0>
+    bool getAndClearLatchedChanged(E id) noexcept { return getAndClearLatchedChanged(static_cast<uint8_t>(id)); }
 
 private:
-    // ---- Storage ---- //
+    enum class ReaderKind : uint8_t
+    {
+        NativeElectrical,
+        PressedPin,
+        PressedCtx,
+        PressedResultPin,
+        PressedResultCtx,
+        ElectricalPin,
+        ElectricalCtx,
+        ElectricalResultPin,
+        ElectricalResultCtx
+    };
 
-    uint8_t pins_[N]{};                       ///< Pin or logical IDs.
-    bool last_state_[N];                      ///< Last committed (debounced) state.
-    bool last_state_read_[N]{};               ///< Most recent raw state (after polarity).
-    uint32_t last_state_change_[N];           ///< Timestamp (ms) when raw state last changed.
-    uint32_t press_start_[N];                 ///< Timestamp (ms) when press started (committed).
-    bool has_press_start_[N]{};               ///< True when press_start_ holds a valid timestamp.
-    ButtonPressType event_[N];                ///< Pending event (short/long/double) per button.
-    bool pending_short_[N]{};                 ///< Pending single waiting for possible double.
-    uint32_t pending_since_[N]{};             ///< Timestamp (ms) of first short release.
-    ButtonPerConfig per_[N];                  ///< Per-button overrides (timing, polarity, enable).
-    ButtonTimingConfig timing_;               ///< Global debounce and press-duration configuration.
-    uint32_t last_duration_[N];               ///< Last measured press duration (ms), set on release.
-    UB::compat::bitset<N> latched_{};         ///< Latched state per button.
-    UB::compat::bitset<N> latched_changed_{}; ///< Edge flag: latched state changed since last clear.
+    struct ResolvedTiming
+    {
+        uint32_t debounce_ms;
+        uint32_t short_press_ms;
+        uint32_t long_press_ms;
+        uint32_t double_click_ms;
+    };
 
-    // ---- Readers ---- //
+    struct ReaderSnapshot
+    {
+        ReaderKind kind;
+        ReadPinFn read_pin;
+        ReadFn read;
+        ReadResultPinFn read_result_pin;
+        ReadResultFn read_result;
+        LevelReadPinFn level_pin;
+        LevelReadFn level;
+        LevelReadResultPinFn level_result_pin;
+        LevelReadResultFn level_result;
+        void *ctx;
+    };
 
-    ReadPinFn read_pin_fn_{nullptr}; ///< Optional fast-path reader (per-pin).
-    ReadFn read_fn_{nullptr};        ///< Optional context-aware reader.
-    void *read_ctx_{nullptr};        ///< Opaque context for @c read_fn_.
+    // ---- Configuration/state storage ---- //
 
-    // ---- Time source ---- //
+    uint8_t pins_[N]{};
+    ButtonPerConfig per_[N]{};
+    ButtonTimingConfig timing_{};
+    bool config_valid_{true};
+    ButtonConfigError config_error_{ButtonConfigError::None};
 
+    bool last_state_[N]{};
+    bool last_state_read_[N]{};
+    uint32_t last_state_change_ms_[N]{};
+    uint32_t press_start_ms_[N]{};
+    bool has_press_start_[N]{};
+    bool long_started_[N]{};
+    bool suppress_until_release_[N]{}; ///< Baseline/recovery hold must release before new interaction events.
+    uint32_t last_duration_ms_[N]{};
+    bool pending_short_[N]{};
+    uint32_t pending_since_[N]{};
+    uint32_t pending_duration_[N]{};
+
+    bool valid_[N]{};
+    bool has_sample_[N]{};
+    bool acquisition_gap_[N]{};
+    ButtonReadError last_error_[N]{};
+    uint32_t sample_ms_[N]{};
+    uint32_t attempt_ms_[N]{};
+    uint32_t error_ms_[N]{};
+    uint32_t sample_sequence_[N]{};
+    uint32_t change_sequence_[N]{};
+    uint32_t generation_[N]{};
+
+    UB::compat::bitset<N> latched_{};
+    UB::compat::bitset<N> latched_changed_{};
+    uint32_t latch_change_sequence_[N]{};
+
+    ButtonEvent event_queue_[UB_EVENT_QUEUE_CAPACITY]{};
+    uint8_t event_count_{0u};
+    uint32_t event_sequence_{0u};
+    uint32_t dropped_events_{0u};
+    bool event_overflow_{false};
+
+    // ---- Reader storage ---- //
+
+    ReaderKind reader_kind_{ReaderKind::NativeElectrical};
+    ReadPinFn read_pin_fn_{nullptr};
+    ReadFn read_fn_{nullptr};
+    ReadResultPinFn read_result_pin_fn_{nullptr};
+    ReadResultFn read_result_fn_{nullptr};
+    LevelReadPinFn level_read_pin_fn_{nullptr};
+    LevelReadFn level_read_fn_{nullptr};
+    LevelReadResultPinFn level_result_pin_fn_{nullptr};
+    LevelReadResultFn level_result_fn_{nullptr};
+    void *read_ctx_{nullptr};
     TimeFn time_fn_{nullptr};
 
-    /**
-     * @brief Configure a native Arduino GPIO pin when Arduino support is available.
-     * @param pin MCU GPIO pin number.
-     * @note Outside Arduino builds this is intentionally a no-op; use skipPinInit=true
-     *       and configure inputs in the platform adapter/application.
-     */
-    static inline void initPin_(uint8_t pin) noexcept
-    {
-#if UB_HAS_ARDUINO
-        pinMode(pin, INPUT_PULLUP);
-#else
-        (void)pin;
-#endif
-    }
+    // ---- Initialization/config validation ---- //
 
-    /**
-     * @brief Read a native Arduino GPIO button using the library default polarity.
-     * @param pin MCU GPIO pin number.
-     * @param activeLow Current button polarity.
-     * @return true when the pin reads LOW on Arduino; inactive fallback when no native GPIO API exists.
-     * @note Non-Arduino builds should provide ReadPinFn/ReadFn readers instead of relying
-     *       on the native GPIO fallback.
-     */
-    static inline bool readNative_(uint8_t pin, bool activeLow) noexcept
+    void initialize_(const uint8_t (&buttonPins)[N], bool skipPinInit) noexcept
     {
-#if UB_HAS_ARDUINO
-        (void)activeLow;
-        return digitalRead(pin) == LOW;
-#else
-        (void)pin;
-        // Return the value that becomes "not pressed" after the active_low transform below.
-        return activeLow ? false : true;
-#endif
-    }
-
-    /**
-     * @brief Resolve the current time in ms. Uses injected TimeFn when provided, otherwise Arduino millis().
-     * @note Outside Arduino builds, pass TimeFn or call update(now); otherwise this returns 0.
-     */
-    inline uint32_t time_now() const noexcept
-    {
-        if (time_fn_)
-            return time_fn_();
-#if UB_HAS_ARDUINO
-        return millis();
-#else
-        return 0U;
-#endif
-    }
-
-    /**
-     * @brief Reset all runtime state for a single button index.
-     * @param i Button index.
-     * @param now Current time (ms).
-     * @note Used when disabling buttons to avoid "stuck" states/events.
-     */
-    inline void resetButton_(size_t i, uint32_t now) noexcept
-    {
-        last_state_[i] = false;
-        last_state_read_[i] = false;
-        last_state_change_[i] = now;
-        press_start_[i] = 0U;
-        has_press_start_[i] = false;
-        event_[i] = ButtonPressType::None;
-        pending_short_[i] = false;
-        pending_since_[i] = 0U;
-        last_duration_[i] = 0U;
-
-        // Clear latching state as well (disabled buttons should not report latch changes).
-        latched_.set(i, false);
-        latched_changed_.set(i, false);
-    }
-
-    /**
-     * @brief Check if a press event matches the configured latch trigger.
-     * @param trig Latch trigger selection.
-     * @param evt Finalized press event.
-     * @return true if evt should drive latching.
-     */
-    static inline bool latchMatches_(LatchTrigger trig, ButtonPressType evt) noexcept
-    {
-        switch (trig)
+        const uint32_t now = time_now();
+        for (size_t i = 0; i < N; ++i)
         {
-        case LatchTrigger::Short:
-            return evt == ButtonPressType::Short;
-        case LatchTrigger::Long:
-            return evt == ButtonPressType::Long;
-        case LatchTrigger::Double:
-            return evt == ButtonPressType::Double;
+            pins_[i] = buttonPins[i];
+            if (!skipPinInit && reader_kind_ == ReaderKind::NativeElectrical)
+                initPin_(pins_[i]);
+            last_error_[i] = ButtonReadError::MissingReader;
+            resetRuntime_(i, now, true);
+        }
+
+        const ButtonConfigResult validation = validateAllWithGlobal_(timing_);
+        config_valid_ = validation.ok;
+        config_error_ = validation.error;
+    }
+
+    static ResolvedTiming resolvedTiming_(const ButtonTimingConfig &global, const ButtonPerConfig &per) noexcept
+    {
+        ResolvedTiming t{};
+        t.debounce_ms = per.debounce_ms != 0u ? static_cast<uint32_t>(per.debounce_ms) : global.debounce_ms;
+        t.short_press_ms = per.short_press_ms != 0u ? static_cast<uint32_t>(per.short_press_ms) : global.short_press_ms;
+        t.long_press_ms = per.long_press_ms != 0u ? static_cast<uint32_t>(per.long_press_ms) : global.long_press_ms;
+        t.double_click_ms = per.double_click_ms != 0u ? static_cast<uint32_t>(per.double_click_ms) : global.double_click_ms;
+        return t;
+    }
+
+    static ButtonConfigResult validateTiming_(const ResolvedTiming &t, uint8_t id) noexcept
+    {
+        if (t.short_press_ms == 0u)
+            return ButtonConfigResult{false, ButtonConfigError::InvalidShortPress, id};
+        if (t.long_press_ms <= t.short_press_ms)
+            return ButtonConfigResult{false, ButtonConfigError::InvalidLongPress, id};
+        if (t.debounce_ms > t.short_press_ms)
+            return ButtonConfigResult{false, ButtonConfigError::InvalidDebounce, id};
+        if (t.double_click_ms < t.debounce_ms)
+            return ButtonConfigResult{false, ButtonConfigError::InvalidDoubleClick, id};
+        return ButtonConfigResult{true, ButtonConfigError::None, id};
+    }
+
+    static ButtonConfigResult validateResolved_(const ButtonTimingConfig &global, const ButtonPerConfig &per, uint8_t id) noexcept
+    {
+        return validateTiming_(resolvedTiming_(global, per), id);
+    }
+
+    ButtonConfigResult validateAllWithGlobal_(const ButtonTimingConfig &global) const noexcept
+    {
+        for (size_t i = 0; i < N; ++i)
+        {
+            const ButtonConfigResult r = validateResolved_(global, per_[i], static_cast<uint8_t>(i));
+            if (!r)
+                return r;
+        }
+        return ButtonConfigResult{true, ButtonConfigError::None, 0xFFu};
+    }
+
+    // ---- Acquisition ---- //
+
+    UB_NODISCARD bool readerUsesElectricalPolarity_() const noexcept
+    {
+        return reader_kind_ == ReaderKind::NativeElectrical ||
+               reader_kind_ == ReaderKind::ElectricalPin ||
+               reader_kind_ == ReaderKind::ElectricalCtx ||
+               reader_kind_ == ReaderKind::ElectricalResultPin ||
+               reader_kind_ == ReaderKind::ElectricalResultCtx;
+    }
+
+    UB_NODISCARD bool readerConfigured_() const noexcept
+    {
+        switch (reader_kind_)
+        {
+        case ReaderKind::NativeElectrical:
+#if UB_HAS_ARDUINO
+            return true;
+#else
+            return false;
+#endif
+        case ReaderKind::PressedPin:
+            return read_pin_fn_ != nullptr;
+        case ReaderKind::PressedCtx:
+            return read_fn_ != nullptr;
+        case ReaderKind::PressedResultPin:
+            return read_result_pin_fn_ != nullptr;
+        case ReaderKind::PressedResultCtx:
+            return read_result_fn_ != nullptr;
+        case ReaderKind::ElectricalPin:
+            return level_read_pin_fn_ != nullptr;
+        case ReaderKind::ElectricalCtx:
+            return level_read_fn_ != nullptr;
+        case ReaderKind::ElectricalResultPin:
+            return level_result_pin_fn_ != nullptr;
+        case ReaderKind::ElectricalResultCtx:
+            return level_result_fn_ != nullptr;
         default:
             return false;
         }
     }
 
-    /**
-     * @brief Apply latch behavior for a finalized press event.
-     * @param i Button index.
-     * @param evt Finalized press event (Short/Long/Double).
-     */
-    inline void applyLatch_(size_t i, ButtonPressType evt) noexcept
+    UB_NODISCARD ButtonPressedResult acquire_(size_t i) const noexcept
     {
-        if (!per_[i].latch_enabled)
-            return;
+        const uint8_t id = pins_[i];
+        switch (reader_kind_)
+        {
+        case ReaderKind::NativeElectrical:
+#if UB_HAS_ARDUINO
+        {
+            const bool high = digitalRead(id) != LOW;
+            return ButtonPressedResult::success(per_[i].active_low ? !high : high);
+        }
+#else
+            return ButtonPressedResult::failure(ButtonReadError::MissingReader);
+#endif
 
-        if (!latchMatches_(per_[i].latch_on, evt))
+        case ReaderKind::PressedPin:
+            return read_pin_fn_ ? ButtonPressedResult::success(read_pin_fn_(id))
+                                : ButtonPressedResult::failure(ButtonReadError::MissingReader);
+
+        case ReaderKind::PressedCtx:
+            return read_fn_ ? ButtonPressedResult::success(read_fn_(read_ctx_, id))
+                            : ButtonPressedResult::failure(ButtonReadError::MissingReader);
+
+        case ReaderKind::PressedResultPin:
+            return read_result_pin_fn_ ? read_result_pin_fn_(id)
+                                       : ButtonPressedResult::failure(ButtonReadError::MissingReader);
+
+        case ReaderKind::PressedResultCtx:
+            return read_result_fn_ ? read_result_fn_(read_ctx_, id)
+                                   : ButtonPressedResult::failure(ButtonReadError::MissingReader);
+
+        case ReaderKind::ElectricalPin:
+            if (!level_read_pin_fn_)
+                return ButtonPressedResult::failure(ButtonReadError::MissingReader);
+            {
+                const bool high = level_read_pin_fn_(id);
+                return ButtonPressedResult::success(per_[i].active_low ? !high : high);
+            }
+
+        case ReaderKind::ElectricalCtx:
+            if (!level_read_fn_)
+                return ButtonPressedResult::failure(ButtonReadError::MissingReader);
+            {
+                const bool high = level_read_fn_(read_ctx_, id);
+                return ButtonPressedResult::success(per_[i].active_low ? !high : high);
+            }
+
+        case ReaderKind::ElectricalResultPin:
+            if (!level_result_pin_fn_)
+                return ButtonPressedResult::failure(ButtonReadError::MissingReader);
+            {
+                const ButtonLevelResult r = level_result_pin_fn_(id);
+                if (!r.valid)
+                    return ButtonPressedResult::failure(normalizeReadError_(r.error));
+                return ButtonPressedResult::success(per_[i].active_low ? !r.high : r.high);
+            }
+
+        case ReaderKind::ElectricalResultCtx:
+            if (!level_result_fn_)
+                return ButtonPressedResult::failure(ButtonReadError::MissingReader);
+            {
+                const ButtonLevelResult r = level_result_fn_(read_ctx_, id);
+                if (!r.valid)
+                    return ButtonPressedResult::failure(normalizeReadError_(r.error));
+                return ButtonPressedResult::success(per_[i].active_low ? !r.high : r.high);
+            }
+
+        default:
+            return ButtonPressedResult::failure(ButtonReadError::MissingReader);
+        }
+    }
+
+    static ButtonReadError normalizeReadError_(ButtonReadError error) noexcept
+    {
+        return error == ButtonReadError::None ? ButtonReadError::AcquisitionFailed : error;
+    }
+
+    void recordSuccess_(size_t i, uint32_t now) noexcept
+    {
+        valid_[i] = true;
+        has_sample_[i] = true;
+        last_error_[i] = ButtonReadError::None;
+        sample_ms_[i] = now;
+        ++sample_sequence_[i];
+    }
+
+    void recordFailure_(size_t i, ButtonReadError error, uint32_t now) noexcept
+    {
+        valid_[i] = false;
+        last_error_[i] = error;
+        error_ms_[i] = now;
+        acquisition_gap_[i] = true;
+
+        // Once acquisition is unobserved, interaction history is ambiguous.
+        // Stable level is retained, but one-shot classification is cancelled.
+        pending_short_[i] = false;
+        has_press_start_[i] = false;
+        long_started_[i] = false;
+    }
+
+    void markAllMissingReader_(uint32_t now) noexcept
+    {
+        for (size_t i = 0; i < N; ++i)
+        {
+            if (!per_[i].enabled)
+                continue;
+            attempt_ms_[i] = now;
+            recordFailure_(i, ButtonReadError::MissingReader, now);
+        }
+    }
+
+    // ---- Debounce/interaction helpers ---- //
+
+    void processRelease_(size_t i, uint32_t now, const ResolvedTiming &t) noexcept
+    {
+        if (suppress_until_release_[i])
+        {
+            suppress_until_release_[i] = false;
+            press_start_ms_[i] = 0u;
+            has_press_start_[i] = false;
+            long_started_[i] = false;
+            return;
+        }
+
+        const uint32_t duration = has_press_start_[i] ? (now - press_start_ms_[i]) : 0u;
+        last_duration_ms_[i] = duration;
+
+        if (duration >= t.long_press_ms)
+        {
+            if (!long_started_[i])
+            {
+                long_started_[i] = true;
+                pushEvent_(static_cast<uint8_t>(i), ButtonEventType::LongStarted, now, duration);
+            }
+            finalizeInteraction_(i, ButtonPressType::Long, ButtonEventType::LongReleased, now, duration);
+            pending_short_[i] = false;
+        }
+        else if (duration >= t.short_press_ms)
+        {
+            if (pending_short_[i] && (now - pending_since_[i]) <= t.double_click_ms)
+            {
+                pending_short_[i] = false;
+                finalizeInteraction_(i, ButtonPressType::Double, ButtonEventType::Double, now, duration);
+            }
+            else
+            {
+                pending_short_[i] = true;
+                pending_since_[i] = now;
+                pending_duration_[i] = duration;
+            }
+        }
+        else
+        {
+            // A sub-short press is intentionally not an interaction event.
+        }
+
+        press_start_ms_[i] = 0u;
+        has_press_start_[i] = false;
+        long_started_[i] = false;
+    }
+
+    void finalizeInteraction_(size_t i,
+                              ButtonPressType legacy,
+                              ButtonEventType detailed,
+                              uint32_t now,
+                              uint32_t duration) noexcept
+    {
+        pushEvent_(static_cast<uint8_t>(i), detailed, now, duration);
+        applyLatch_(i, legacy);
+    }
+
+    void synchronizeFromSample_(size_t i, bool pressed, uint32_t now) noexcept
+    {
+        last_state_[i] = pressed;
+        last_state_read_[i] = pressed;
+        last_state_change_ms_[i] = now;
+        pending_short_[i] = false;
+        pending_since_[i] = 0u;
+        pending_duration_[i] = 0u;
+        long_started_[i] = false;
+        acquisition_gap_[i] = false;
+        ++generation_[i];
+
+        if (pressed)
+        {
+            // A held level observed during sync/recovery is current stable state,
+            // but it did not begin under observation. Suppress interaction
+            // classification until a release establishes a clean boundary.
+            press_start_ms_[i] = 0u;
+            has_press_start_[i] = false;
+            suppress_until_release_[i] = true;
+        }
+        else
+        {
+            press_start_ms_[i] = 0u;
+            has_press_start_[i] = false;
+            suppress_until_release_[i] = false;
+        }
+    }
+
+    bool syncButton_(size_t i, uint32_t now) noexcept
+    {
+        if (!per_[i].enabled)
+            return true;
+        if (!config_valid_ || !readerConfigured_())
+        {
+            attempt_ms_[i] = now;
+            recordFailure_(i, ButtonReadError::MissingReader, now);
+            return false;
+        }
+        const ButtonPressedResult sample = acquire_(i);
+        attempt_ms_[i] = now;
+        if (!sample.valid)
+        {
+            recordFailure_(i, normalizeReadError_(sample.error), now);
+            return false;
+        }
+        recordSuccess_(i, now);
+        synchronizeFromSample_(i, sample.pressed, now);
+        return true;
+    }
+
+    void resetRuntime_(size_t i, uint32_t now, bool restoreInitialLatch) noexcept
+    {
+        last_state_[i] = false;
+        last_state_read_[i] = false;
+        last_state_change_ms_[i] = now;
+        press_start_ms_[i] = 0u;
+        has_press_start_[i] = false;
+        long_started_[i] = false;
+        suppress_until_release_[i] = false;
+        last_duration_ms_[i] = 0u;
+        pending_short_[i] = false;
+        pending_since_[i] = 0u;
+        pending_duration_[i] = 0u;
+        valid_[i] = false;
+        has_sample_[i] = false;
+        acquisition_gap_[i] = false;
+        last_error_[i] = ButtonReadError::MissingReader;
+        sample_ms_[i] = 0u;
+        attempt_ms_[i] = 0u;
+        error_ms_[i] = 0u;
+        if (restoreInitialLatch)
+        {
+            latched_.set(i, per_[i].latch_initial);
+            latched_changed_.set(i, false);
+        }
+    }
+
+    void resetDisabledButton_(size_t i, uint32_t now) noexcept
+    {
+        resetRuntime_(i, now, false);
+        latched_.set(i, false);
+        latched_changed_.set(i, false);
+    }
+
+    // ---- Event queue ---- //
+
+    void pushEvent_(uint8_t buttonId, ButtonEventType type, uint32_t now, uint32_t duration) noexcept
+    {
+        ++event_sequence_;
+        if (event_count_ >= static_cast<uint8_t>(UB_EVENT_QUEUE_CAPACITY))
+        {
+            ++dropped_events_;
+            event_overflow_ = true;
+            return;
+        }
+
+        ButtonEvent evt{};
+        evt.button_id = buttonId;
+        evt.type = type;
+        evt.timestamp_ms = now;
+        evt.duration_ms = duration;
+        evt.sequence = event_sequence_;
+        event_queue_[event_count_] = evt;
+        ++event_count_;
+    }
+
+    void removeEventAt_(uint8_t index) noexcept
+    {
+        if (index >= event_count_)
+            return;
+        for (uint8_t i = index; static_cast<uint16_t>(i) + 1u < event_count_; ++i)
+            event_queue_[i] = event_queue_[static_cast<uint8_t>(i + 1u)];
+        --event_count_;
+    }
+
+    void clearEventQueue_() noexcept { event_count_ = 0u; }
+
+    static ButtonPressType toPressType_(ButtonEventType type) noexcept
+    {
+        switch (type)
+        {
+        case ButtonEventType::Short:
+            return ButtonPressType::Short;
+        case ButtonEventType::Double:
+            return ButtonPressType::Double;
+        case ButtonEventType::LongReleased:
+            return ButtonPressType::Long;
+        case ButtonEventType::LongStarted:
+        default:
+            return ButtonPressType::None;
+        }
+    }
+
+    // ---- Latching ---- //
+
+    static bool latchMatches_(LatchTrigger trigger, ButtonPressType event) noexcept
+    {
+        switch (trigger)
+        {
+        case LatchTrigger::Short:
+            return event == ButtonPressType::Short;
+        case LatchTrigger::Long:
+            return event == ButtonPressType::Long;
+        case LatchTrigger::Double:
+            return event == ButtonPressType::Double;
+        default:
+            return false;
+        }
+    }
+
+    void applyLatch_(size_t i, ButtonPressType event) noexcept
+    {
+        if (!per_[i].latch_enabled || !latchMatches_(per_[i].latch_on, event))
             return;
 
         const bool before = latched_.test(i);
         bool after = before;
-
         switch (per_[i].latch_mode)
         {
         case LatchMode::Toggle:
@@ -837,9 +1557,73 @@ private:
         }
 
         if (after != before)
-        {
-            latched_.set(i, after);
-            latched_changed_.set(i, true);
-        }
+            setLatched(static_cast<uint8_t>(i), after);
+    }
+
+    // ---- Reader reconfiguration helpers ---- //
+
+    ReaderSnapshot readerSnapshot_() const noexcept
+    {
+        ReaderSnapshot s{};
+        s.kind = reader_kind_;
+        s.read_pin = read_pin_fn_;
+        s.read = read_fn_;
+        s.read_result_pin = read_result_pin_fn_;
+        s.read_result = read_result_fn_;
+        s.level_pin = level_read_pin_fn_;
+        s.level = level_read_fn_;
+        s.level_result_pin = level_result_pin_fn_;
+        s.level_result = level_result_fn_;
+        s.ctx = read_ctx_;
+        return s;
+    }
+
+    void restoreReader_(const ReaderSnapshot &s) noexcept
+    {
+        reader_kind_ = s.kind;
+        read_pin_fn_ = s.read_pin;
+        read_fn_ = s.read;
+        read_result_pin_fn_ = s.read_result_pin;
+        read_result_fn_ = s.read_result;
+        level_read_pin_fn_ = s.level_pin;
+        level_read_fn_ = s.level;
+        level_result_pin_fn_ = s.level_result_pin;
+        level_result_fn_ = s.level_result;
+        read_ctx_ = s.ctx;
+    }
+
+    void clearOtherReaders_() noexcept
+    {
+        read_pin_fn_ = nullptr;
+        read_fn_ = nullptr;
+        read_result_pin_fn_ = nullptr;
+        read_result_fn_ = nullptr;
+        level_read_pin_fn_ = nullptr;
+        level_read_fn_ = nullptr;
+        level_result_pin_fn_ = nullptr;
+        level_result_fn_ = nullptr;
+        read_ctx_ = nullptr;
+    }
+
+    // ---- Platform/time helpers ---- //
+
+    static void initPin_(uint8_t pin) noexcept
+    {
+#if UB_HAS_ARDUINO
+        pinMode(pin, INPUT_PULLUP);
+#else
+        (void)pin;
+#endif
+    }
+
+    UB_NODISCARD uint32_t time_now() const noexcept
+    {
+        if (time_fn_)
+            return time_fn_();
+#if UB_HAS_ARDUINO
+        return static_cast<uint32_t>(millis());
+#else
+        return 0u;
+#endif
     }
 };

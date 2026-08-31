@@ -1,15 +1,23 @@
 /**
- * @file 02_Press_Type.ino
+ * MIT License
  *
- * @brief Press-type events (short/long/double) with custom debounce/thresholds.
+ * @brief Classify short, long, and double-click button interactions.
+ *
+ * @file 02_PressType.ino
+ * @author Little Man Builds (Darren Osborne)
+ * @date 2026-08-07
+ * @copyright Copyright © 2026 Little Man Builds
  */
 
-// Explicit button mapping (compile-time). MUST be BEFORE <Universal_Button> header include.
+// Define the logical button name before including <Universal_Button.h>.
 #define BUTTON_LIST(X) \
     X(TestButton, 6) ///< TestButton == GPIO6. INPUT_PULLUP (pressed == LOW).
 
-#include <Arduino.h>
 #include <Universal_Button.h>
+
+#include <Arduino.h>
+
+namespace ubcfg = UB::config; ///< Shorter name for the button list above.
 
 /**
  * Custom timings (ms): debounce, short, long, double-click-gap.
@@ -22,7 +30,7 @@ constexpr ButtonTimingConfig kTiming{
     400   ///< Double_click_ms: second short press within 400ms -> Double.
 };
 
-// Create handler sized to NUM_BUTTONS from mapping above, with custom timing.
+// Create handler sized to ubcfg::NUM_BUTTONS from mapping above, with custom timing.
 static Button btns = makeButtons(kTiming);
 
 void setup()
@@ -33,7 +41,7 @@ void setup()
     // (Optional) Per-button override example:
     // ButtonPerConfig pc{};
     // pc.double_click_ms = 250; ///< Faster double-click just for this button.
-    // btns.setPerConfig(ButtonIndex::TestButton, pc);
+    // btns.setPerConfig(ubcfg::ButtonIndex::TestButton, pc);
 }
 
 void loop()
@@ -41,7 +49,7 @@ void loop()
     btns.update();
 
     // Get-and-consume the event for TestButton.
-    const ButtonPressType evt = btns.getPressType(ButtonIndex::TestButton);
+    const ButtonPressType evt = btns.getPressType(ubcfg::ButtonIndex::TestButton);
 
     switch (evt)
     {
@@ -57,7 +65,7 @@ void loop()
         break;
 
     case ButtonPressType::Long:
-        Serial.println("Long press detected!");
+        Serial.println("Long press completed (released)!");
         break;
 
     default:

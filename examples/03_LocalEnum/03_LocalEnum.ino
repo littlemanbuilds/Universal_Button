@@ -1,11 +1,17 @@
 /**
- * @file 03_Local_Enum.ino
+ * MIT License
  *
- * @brief Minimal example using a local enum and an explicit pins array (no list/factory helpers).
+ * @brief Use ButtonHandler directly with a local enum and explicit pin array.
+ *
+ * @file 03_LocalEnum.ino
+ * @author Little Man Builds (Darren Osborne)
+ * @date 2026-08-07
+ * @copyright Copyright © 2026 Little Man Builds
  */
 
-#include <Arduino.h>
 #include <ButtonHandler.h>
+
+#include <Arduino.h>
 
 enum class LocalButton : uint8_t
 {

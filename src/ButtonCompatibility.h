@@ -5,7 +5,7 @@
  *
  * @file ButtonCompatibility.h
  * @author Little Man Builds (Darren Osborne)
- * @date 2026-01-29
+ * @date 2026-08-07
  * @copyright Copyright © 2026 Little Man Builds
  */
 
@@ -30,6 +30,14 @@
 
 #if UB_HAS_ARDUINO
 #include <Arduino.h>
+#endif
+
+#ifndef UB_NODISCARD
+#if __cplusplus >= 201703L
+#define UB_NODISCARD [[nodiscard]]
+#else
+#define UB_NODISCARD
+#endif
 #endif
 
 #if defined(__has_include)
@@ -181,7 +189,7 @@ namespace UB
              * @param i Bit index.
              * @return True if bit is set; false otherwise.
              */
-            [[nodiscard]] bool test(size_t i) const noexcept
+            UB_NODISCARD bool test(size_t i) const noexcept
             {
                 if (i >= N)
                     return false;
@@ -199,8 +207,9 @@ namespace UB
             static constexpr size_t size() noexcept { return N; }
 
         private:
-            static constexpr size_t kBytes = (N + 7u) / 8u; ///< Number of bytes required to store N bits (ceil(N / 8)).
-            uint8_t data_[kBytes];                          ///< Packed bit storage.
+            static constexpr size_t kRawBytes = (N + 7u) / 8u;             ///< Raw byte count for N bits.
+            static constexpr size_t kBytes = kRawBytes == 0u ? 1u : kRawBytes; ///< Storage byte count; keeps bitset<0> portable.
+            uint8_t data_[kBytes];                                        ///< Packed bit storage.
         };
     } // namespace compat
 } // namespace UB

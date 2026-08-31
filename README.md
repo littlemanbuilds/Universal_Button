@@ -1,708 +1,1279 @@
 # Universal_Button
 
-Generic multi‑button handler for Arduino/ESP platforms with solid debounce and short/long **and double** press events.  
-The library is **device‑agnostic** (works with plain GPIO) and can also read buttons from external sources (e.g., MCP23017 port expanders) by plugging in a custom reader function.  
-It includes enum‑friendly helpers, per‑button overrides, **exact last‑press duration**, utilities, a clean “easy header” with factories, and (from v1.6.0) **latching** support.
+A small, header-only Arduino library for turning physical buttons into **stable levels and trustworthy interactions**.
 
-- **New in v1.4.0:** optional **time source injection (`TimeFn`)** and time-source factory overloads so you can use RTOS clocks (e.g., FreeRTOS ticks) or any millisecond source.
-- **New in v1.5.0:** **double‑click detection** (`ButtonPressType::Double`) with global and per‑button configuration (`double_click_ms`), plus small runtime helpers (`enable`, `setActiveLow`, `setGlobalTiming`) and enum‑friendly overloads for smoother call‑sites.
-- **New in v1.6.0:** **latching behaviour** (toggle / set / reset) driven by a chosen press event (**Short / Long / Double**). Each button can opt‑in via `ButtonPerConfig` and you can query `isLatched()`, `latchedMask()`, an edge flag `getAndClearLatchedChanged()`, and you can also force/clear latches from application code via `setLatched()`, `clearAllLatched()`, and `clearLatchedMask()` (useful for “global reset” policies).
-- **New in v1.7.0:** `peekPressType()` for non‑consuming event reads, clearer Arduino/non‑Arduino timing notes, and release-package hygiene updates.
+Universal_Button handles the repetitive parts of button input that become surprisingly difficult in larger embedded projects:
 
-> **Author:** Little Man Builds  
-> **License:** MIT
+- debounce;
+- short, long and double-click classification;
+- a long-press threshold event while the button is still held;
+- explicit input validity/freshness;
+- logical pressed-state **and** electrical HIGH/LOW readers;
+- validity-aware readers for expanders and cached input systems;
+- bounded event preservation with overflow diagnostics;
+- optional latching;
+- synchronized runtime reconfiguration;
+- enum-friendly APIs;
+- no dynamic allocation.
 
----
+ESP32-S3 is the primary development target, but the core remains intentionally portable.
 
-## Highlights
-
-- **Rock‑solid debounce**
-- **Short / Long / Double press detection**
-- **Latching support**: toggle / set / reset driven by a chosen press event
-- **Exact last press duration**
-- **Convenience helpers**: enum overloads, `pressedMask()`, `snapshot()`, `forEach()`, `sizeStatic()`
-- **Non-consuming event peek**: `peekPressType()` lets diagnostics/UI code observe a pending event before another layer consumes it
-- **Per‑button overrides**: `debounce_ms`, `short_press_ms`, `long_press_ms`, `double_click_ms`, `active_low`, `enabled`, and latching config
-- **Pluggable readers** (GPIO, MCP, custom; pointer or context‑aware)
-- **Header‑only** integration
-- **Optional TimeFn** (inject custom millisecond clock; falls back to `millis()`)
-- **Compile-time options**: `UB_REQUIRE_BUTTON_LIST` and `UB_UTIL_NO_CONFIG_MAP`
+> **v2.0.0 changes one important rule:** if you include `Universal_Button.h`, you must explicitly define your button mapping. The old silent GPIO25 fallback has been removed.
 
 ---
 
 ## Contents
 
-- [Universal_Button](#universal_button)
-  - [Highlights](#highlights)
-  - [Contents](#contents)
-  - [Installation](#installation)
-  - [Supported Platforms](#supported-platforms)
-  - [Concepts](#concepts)
-  - [Configuration Mapping](#configuration-mapping)
-  - [Compile-Time Options](#compile-time-options)
-  - [Quick Use (Easy Header)](#quick-use-easy-header)
-  - [Latching](#latching)
-    - [Latch modes](#latch-modes)
-    - [Latch triggers](#latch-triggers)
-    - [Why latching is applied on a finalized event](#why-latching-is-applied-on-a-finalized-event)
-  - [Timing Model \& TimeFn](#timing-model--timefn)
-    - [Ways to supply time](#ways-to-supply-time)
-  - [API Reference](#api-reference)
-    - [Types](#types)
-    - [Interface: `IButtonHandler`](#interface-ibuttonhandler)
-    - [Concrete: `ButtonHandler<N>`](#concrete-buttonhandlern)
-    - [Factories (Easy Header)](#factories-easy-header)
-    - [Utils](#utils)
-  - [Examples](#examples)
-  - [Mixed Inputs (GPIO + Expander)](#mixed-inputs-gpio--expander)
-  - [Performance Notes](#performance-notes)
-  - [FAQ](#faq)
-  - [Compatibility Testing](#compatibility-testing)
-  - [Contributing / Issues](#contributing--issues)
-  - [License](#license)
+1. [What problem does this solve?](#what-problem-does-this-solve)
+2. [Design boundaries](#design-boundaries)
+3. [Installation](#installation)
+4. [Supported targets](#supported-targets)
+5. [Beginner path](#beginner-path)
+6. [The two reader contracts](#the-two-reader-contracts)
+7. [Input validity and freshness](#input-validity-and-freshness)
+8. [Debounced state vs interaction events](#debounced-state-vs-interaction-events)
+9. [Short, double and long semantics](#short-double-and-long-semantics)
+10. [The bounded event queue](#the-bounded-event-queue)
+11. [Timing configuration](#timing-configuration)
+12. [Synchronization, reset and recovery](#synchronization-reset-and-recovery)
+13. [Per-button configuration](#per-button-configuration)
+14. [Latching](#latching)
+15. [Compile-time button mapping](#compile-time-button-mapping)
+16. [Port expanders and cached input](#port-expanders-and-cached-input)
+17. [Examples](#examples)
+18. [Testing](#testing)
+19. [API reference](#api-reference)
+20. [Migrating from v1.7.x](#migrating-from-v17x)
+21. [PW_PVT-style integration](#pw_pvt-style-integration)
+22. [Repository structure](#repository-structure)
+23. [Limitations and design notes](#limitations-and-design-notes)
+24. [Version history](#version-history)
+25. [License](#license)
+
+---
+
+## What problem does this solve?
+
+A button looks simple:
+
+```cpp
+if (digitalRead(pin) == LOW)
+{
+    // pressed
+}
+```
+
+That is fine until the project needs to answer harder questions:
+
+- Did the contact bounce?
+- Has the input source stopped responding?
+- Was this one press or two?
+- Has the long threshold been reached **while the user is still holding the button**?
+- Did two events occur before the consumer had time to read them?
+- Was the callback returning a logical button state or a raw electrical level?
+- Did changing reader/polarity create a fake button edge?
+- Is a held button safe to use as a hold-to-enable input?
+- Can a port-expander read failure be distinguished from “not pressed”?
+
+Universal_Button separates these concerns instead of hiding them behind one ambiguous boolean.
+
+The normal flow is:
+
+```text
+physical input
+    ↓
+reader / acquisition validity
+    ↓
+logical pressed state
+    ↓
+debounce
+    ↓
+stable level ─────────────→ isPressed() / isLongHeld()
+    ↓
+interaction classification
+    ↓
+bounded event queue ──────→ Short / Double / LongStarted / LongReleased
+```
+
+---
+
+## Design boundaries
+
+Universal_Button intentionally **does**:
+
+- read one or more button inputs;
+- normalize electrical polarity when requested;
+- debounce each logical input;
+- expose stable pressed/held state;
+- classify user interactions;
+- retain multiple interaction events in a bounded queue;
+- expose input health, freshness and sequence metadata;
+- support explicit latching behavior.
+
+Universal_Button intentionally **does not**:
+
+- own an application task;
+- depend on SnapshotBus, SwitchBank, NVMKit, SafetyCore or PW_PVT;
+- persist configuration;
+- decide whether a button is allowed to move a vehicle;
+- turn one-shot interaction events into a system-wide event bus;
+- allocate from the heap.
+
+That keeps the library useful by itself while allowing a larger project to wrap it with whatever transport/safety architecture it needs.
 
 ---
 
 ## Installation
 
-**Arduino IDE:** search **UNIVERSAL_BUTTON** in Library Manager.  
-**Manual:** download the release ZIP → _Sketch → Include Library → Add .ZIP Library…_  
-**PlatformIO:** Search libraries and add to `lib_deps` or install from ZIP.
+### Arduino Library Manager
 
-> The core library **does not** force an MCP dependency. Only examples that use MCP include it.
+When the release is available through Arduino Library Manager:
 
----
+1. Open **Sketch → Include Library → Manage Libraries...**
+2. Search for **Universal_Button**.
+3. Install the latest version.
 
-## Supported Platforms
+### PlatformIO
 
-The main supported target is the **Arduino framework**. Native GPIO mode uses Arduino `pinMode()`, `digitalRead()`, and `millis()`; external-reader mode lets the same debouncer/event logic read from GPIO adapters, MCP23017 expanders, cached bus snapshots, or your own hardware layer.
+Add the library to your project dependencies:
 
-The examples are regularly compile-tested with PlatformIO on:
+```ini
+lib_deps =
+    littlemanbuilds/Universal_Button@^2.0.0
+```
 
-- AVR (Uno, Nano, Mega-class boards)
-- megaAVR (Nano Every)
-- ESP32
-- ESP8266
-- RP2040 (Raspberry Pi Pico)
-- SAMD (MKR / Zero)
-- STM32 (Nucleo-class boards)
-- Teensy 4.x
+### Manual installation
 
-Other Arduino-compatible boards may work, but are not currently part of the automated test matrix.
-
-**ESP32 / FreeRTOS notes:**
-
-- The library stays Arduino-framework focused on every listed target; it does not pretend that native GPIO mode is portable to non-Arduino SDKs.
-- `xTaskGetTickCount()` / `portTICK_PERIOD_MS` examples are ESP32/FreeRTOS integration examples. On other platforms, supply whatever millisecond clock is correct for that platform, or just use the default Arduino `millis()`.
-- Outside Arduino builds, use an external reader plus a `TimeFn`, or call `update(now_ms)` with your own timestamp. Without Arduino and without `TimeFn`, there is no implicit clock to use.
-- MCP23017 examples depend on `Wire` and the Adafruit MCP23X17 library; real hardware support follows those dependencies and your board wiring.
+Copy the `Universal_Button` folder into your Arduino `libraries` directory or your PlatformIO project's `lib/` directory.
 
 ---
 
-## Concepts
+## Supported targets
 
-- **Key**: the value stored in `BUTTON_PINS[i]` (usually an MCU GPIO number, but it can be any 8‑bit token you choose).
-- **Logical index**: position of the button in your mapping (0..`NUM_BUTTONS`‑1).
-- **Raw state**: the immediate (possibly bouncing) reading.
-- **Committed state**: the debounced, stable state after `debounce_ms` of stability.
+The implementation is standard C++11 and avoids dynamic allocation.
 
-**Debounce uses a “raw/committed” split**:
+`library.properties` declares support for AVR, megaAVR, SAMD, ESP32, ESP8266, RP2040, Teensy and STM32. Repository CI uses one representative compile target for each of those architecture families:
 
-- Track the **last raw state** and the **time it changed**.
-- When the raw state stays unchanged for `debounce_ms`, we **commit** it and generate an event on release based on **press duration** (`short_press_ms`, `long_press_ms`) and possibly **double‑click** if a second short arrives within `double_click_ms`.
-- Because double‑click detection has to wait for a possible second short press, a **Short** event is delayed until the `double_click_ms` window expires. A **Double** emits as soon as the second short press is finalized.
-- **Exact duration** is recorded for retrieval with `getLastPressDuration()` (for a Double, duration is of the **second** press).
+- ESP32-S3 DevKitC-1;
+- ESP8266;
+- RP2040 Pico;
+- SAMD (MKR Zero);
+- Nano Every;
+- AVR Uno;
+- Teensy 4.1;
+- STM32 Blue Pill.
 
-**Latching:**
-
-- **Latched state**: an independent ON/OFF state stored per button, updated only when a **finalized press event** occurs (Short/Long/Double) and latching is enabled for that button.
-  - This is useful for “virtual toggles” (headlights, enable flags, modes) where you don’t want to hold the button down.
+The public learning examples are primarily written for **ESP32-S3**.
 
 ---
 
-## Configuration Mapping
+## Beginner path
 
-Define your buttons once using `BUTTON_LIST(X)` **before including** `Universal_Button.h` (or any header that uses the mapping).
+You do not need to understand event queues, freshness counters or port expanders to get started.
+
+The simplest useful workflow is:
+
+1. define your button;
+2. create the handler;
+3. call `update()` repeatedly;
+4. ask `isPressed()`;
+5. optionally read `getPressType()` later.
+
+### 1. Wire one button
+
+For the normal beginner wiring:
+
+```text
+ESP32-S3 GPIO6 ---- button ---- GND
+```
+
+Universal_Button's native GPIO path uses `INPUT_PULLUP`, so:
+
+- released = HIGH;
+- pressed = LOW.
+
+No external pull-up resistor is normally required.
+
+### 2. Define the button before including the library
 
 ```cpp
 #define BUTTON_LIST(X) \
-  X(Start, 4) \
-  X(Stop, 5)
+    X(TestButton, 6)
 
 #include <Universal_Button.h>
+
+#include <Arduino.h>
 ```
 
-This generates:
+There is deliberately **no hidden default button** in v2.
 
-- `constexpr uint8_t BUTTON_PINS[] = {4, 5};`
-- `constexpr size_t NUM_BUTTONS = 2;`
-- `enum class ButtonIndex : uint8_t { Start, Stop, _COUNT };`
-- `struct ButtonPins { static constexpr uint8_t Start=4; static constexpr uint8_t Stop=5; };`
-
-A **default** mapping is provided (single `TestButton` on pin 25) if you do nothing.
-
-If your project requires an explicit mapping, define `UB_REQUIRE_BUTTON_LIST` before including `Universal_Button.h`; in that mode, missing `BUTTON_LIST(X)` is a compile-time error.
-
----
-
-## Compile-Time Options
-
-### `UB_REQUIRE_BUTTON_LIST`
-
-By default, the library provides a fallback mapping (`TestButton` on pin 25).  
-If you want to **forbid** that fallback and require every sketch to define an explicit mapping, set:
+### 3. Create the handler
 
 ```cpp
-#define UB_REQUIRE_BUTTON_LIST
-#define BUTTON_LIST(X) \
-  X(Start, 4) \
-  X(Stop, 5)
-#include <Universal_Button.h>
+static Button buttons = makeButtons();
 ```
 
-### `UB_UTIL_NO_CONFIG_MAP`
-
-`Universal_Button_Utils.h` can expose:
-
-- `indexFromKey(...)` for config-based mapping (`BUTTON_PINS`)
-- `indexFromKeyIn(...)` for explicit arrays
-
-If you only want the generic helper and do **not** want config mapping pulled in, set:
+### 4. Update it in `loop()`
 
 ```cpp
-#define UB_UTIL_NO_CONFIG_MAP
-#include <Universal_Button_Utils.h> // exposes indexFromKeyIn(...) only
-```
+void loop()
+{
+    buttons.update();
 
----
-
-## Quick Use (Easy Header)
-
-```cpp
-#define BUTTON_LIST(X) X(TestButton, 25)
-#include <Universal_Button.h>
-
-static Button btns = makeButtons();  // uses BUTTON_PINS/NUM_BUTTONS
-
-void setup() { Serial.begin(115200); }
-void loop() {
-  btns.update();
-  if (btns.isPressed(ButtonIndex::TestButton)) {
-    Serial.println("Pressed!");
-  }
-  delay(10);
+    if (buttons.isPressed(UB::config::ButtonIndex::TestButton))
+    {
+        Serial.println("Pressed");
+    }
 }
 ```
 
-Custom timings:
+That is enough for a stable debounced level.
+
+### 5. Add short/long/double interactions only when you need them
 
 ```cpp
-// debounce, short, long, double-click (ms)
-constexpr ButtonTimingConfig kTiming{50, 300, 1500, 400};
-static Button btns = makeButtons(kTiming);
+const ButtonPressType event =
+    buttons.getPressType(UB::config::ButtonIndex::TestButton);
+
+if (event == ButtonPressType::Short)
+{
+    Serial.println("Short press");
+}
+else if (event == ButtonPressType::Long)
+{
+    Serial.println("Long press completed");
+}
 ```
 
-Per‑button override for faster double‑click:
+`getPressType()` is the familiar/simple interface. The detailed queue is there when a bigger project needs it.
+
+### 6. Check validity in larger applications
+
+With native GPIO there is usually no software-level read failure to report.
+
+With an expander, cached input source or other hardware abstraction, prefer a validity-aware reader and check:
 
 ```cpp
-ButtonPerConfig pc{};
-pc.double_click_ms = 250; // faster than global
-btns.setPerConfig(ButtonIndex::TestButton, pc);
+if (!buttons.valid())
+{
+    // Do not use the input as a fresh command.
+}
 ```
 
-External reader (e.g., expander):
+That is the point where a beginner sketch becomes a production input provider.
+
+---
+
+## The two reader contracts
+
+The biggest v1.x ambiguity was that a callback documented as “pressed?” was then polarity-transformed again.
+
+v2 makes the contract explicit.
+
+### 1. Logical pressed-state reader
+
+Use this when your callback already knows whether the button is pressed:
 
 ```cpp
-static bool readFunc(uint8_t key) { return digitalRead(key) == LOW; }
-static Button btns = makeButtonsWithReader(readFunc, /*timing=*/{}, /*skipPinInit=*/true);
+static bool readPressed(uint8_t key)
+{
+    return myHardwareSaysPressed(key);
+}
+
+static Button buttons = makeButtonsWithReader(readPressed);
 ```
 
-Explicit pins (no config):
+The contract is:
+
+```text
+false = not pressed
+true  = pressed
+```
+
+`active_low` is irrelevant to this callback because polarity has already been resolved.
+
+### 2. Electrical-level reader
+
+Use this when the callback returns the actual HIGH/LOW level:
 
 ```cpp
-constexpr uint8_t MY_PINS[] = {4, 5, 18};
-auto btns = makeButtonsWithPins(MY_PINS);
+static bool readLevel(uint8_t pin)
+{
+    return digitalRead(pin) == HIGH;
+}
+
+static Button buttons = makeButtonsWithElectricalReader(readLevel);
 ```
+
+The contract is:
+
+```text
+false = LOW
+true  = HIGH
+```
+
+Universal_Button then applies `ButtonPerConfig::active_low`.
+
+With the default:
+
+```cpp
+active_low = true;
+```
+
+LOW becomes pressed.
+
+### Why the distinction matters
+
+These two callbacks may both return `bool`, but they do **not** mean the same thing.
+
+v2 therefore uses deliberately different factory/setter names rather than guessing.
+
+---
+
+## Input validity and freshness
+
+A plain `bool` reader is convenient, but it cannot say “the read failed.”
+
+For hardware where that distinction exists, use a result reader.
+
+### Logical pressed-state result
+
+```cpp
+ButtonPressedResult readButton(uint8_t key)
+{
+    if (!hardwareOk())
+        return ButtonPressedResult::failure();
+
+    return ButtonPressedResult::success(isPressed(key));
+}
+```
+
+### Electrical-level result
+
+```cpp
+ButtonLevelResult readLevel(uint8_t key)
+{
+    if (!hardwareOk())
+        return ButtonLevelResult::failure();
+
+    return ButtonLevelResult::success(readHigh(key));
+}
+```
+
+### What happens on failure?
+
+Universal_Button does **not** turn the failure into `false`.
+
+Instead it:
+
+- marks the input invalid;
+- retains the last stable debounced level;
+- records the failure timestamp/error;
+- cancels ambiguous interaction timing;
+- marks an acquisition gap;
+- waits for a successful read;
+- rebaselines the recovered level without generating synthetic events.
+
+Useful queries include:
+
+```cpp
+buttons.configured();
+buttons.configError();
+buttons.valid();
+buttons.hasSample();
+
+buttons.valid(id);
+buttons.hasSample(id);
+buttons.sampleMs(id);
+buttons.sequence(id);
+buttons.changeSequence(id);
+buttons.generation(id);
+buttons.inputStatus(id);
+buttons.status();
+```
+
+### `valid` is not the same as `hasSample`
+
+`hasSample()` answers:
+
+> Has this enabled input ever produced a successful acquisition?
+
+`valid()` answers:
+
+> Was the most recent acquisition successful?
+
+A mature application often needs both.
+
+---
+
+## Debounced state vs interaction events
+
+These are different data types and should be treated differently.
+
+### Stable state
+
+```cpp
+buttons.isPressed(id);
+buttons.isLongHeld(id);
+```
+
+These answer **what is true now**.
+
+They are appropriate for:
+
+- horn held state;
+- hold-to-enable inputs;
+- current button level;
+- latest-state snapshots.
+
+### Interaction events
+
+```cpp
+ButtonEvent event;
+while (buttons.popEvent(event))
+{
+    ...
+}
+```
+
+These answer **what happened**.
+
+They are appropriate for:
+
+- short press;
+- double click;
+- long threshold reached;
+- long press released;
+- UI actions that must not be silently overwritten.
+
+Do not use a one-shot event as a substitute for a continuously required hold state.
+
+For example, a hold-to-enable function should consume `isPressed()`/freshness, not `LongStarted`.
+
+---
+
+## Short, double and long semantics
+
+### Short
+
+A press must remain debounced/held for at least `short_press_ms` and be released before the long threshold.
+
+A single short interaction is delayed until the double-click window has expired because the library cannot know immediately whether a second short press is coming.
+
+### Double
+
+Two completed short interactions whose release-to-release interval is within `double_click_ms` produce one `Double` interaction.
+
+The first short is not emitted separately.
+
+### LongStarted
+
+When a debounced press reaches `long_press_ms` while still held, the detailed event queue receives:
+
+```cpp
+ButtonEventType::LongStarted
+```
+
+At the same time:
+
+```cpp
+buttons.isLongHeld(id) == true
+```
+
+### LongReleased
+
+When that long-held button is released, the detailed queue receives:
+
+```cpp
+ButtonEventType::LongReleased
+```
+
+The compatibility API maps that completed interaction to:
+
+```cpp
+ButtonPressType::Long
+```
+
+So the old simple API retains the intuitive behavior:
+
+> `Long` means the long press is complete and has been released.
+
+The new detailed API adds the missing threshold-time information.
+
+---
+
+## The bounded event queue
+
+v1.x stored only one pending event per button. If several interactions completed before a consumer read the slot, a newer event could replace an older one.
+
+v2 uses a fixed-capacity queue.
+
+Default capacity:
+
+```cpp
+UB_EVENT_QUEUE_CAPACITY == 16
+```
+
+You can override it before including the library:
+
+```cpp
+#define UB_EVENT_QUEUE_CAPACITY 8
+#include <ButtonHandler.h>
+```
+
+No heap allocation is used.
+
+### Reading events
+
+```cpp
+ButtonEvent event;
+while (buttons.popEvent(event))
+{
+    Serial.print("Button: ");
+    Serial.println(event.button_id);
+}
+```
+
+Each event includes:
+
+```cpp
+event.button_id;
+event.type;
+event.timestamp_ms;
+event.duration_ms;
+event.sequence;
+```
+
+### Detecting overflow
+
+The queue intentionally does not pretend it has infinite storage.
+
+When full, the newest event is rejected and the library records the loss:
+
+```cpp
+buttons.eventOverflowed();
+buttons.droppedEventCount();
+buttons.eventSequence();
+```
+
+`eventSequence()` advances for every generated event, including dropped ones.
+
+That allows larger systems to detect that event history is incomplete.
+
+### `getPressType()` and `popEvent()` are alternate consumption styles
+
+`getPressType(button)` is retained for simple sketches.
+
+`popEvent()` is preferred when a project needs ordered, loss-detectable interactions.
+
+They consume the same detailed event stream, so do not treat them as independent subscribers.
+
+If multiple application components need reliable copies of every event, fan the events out at the application/event-bus layer.
+
+---
+
+## Timing configuration
+
+The global timing object is:
+
+```cpp
+ButtonTimingConfig timing{
+    30,   // debounce_ms
+    200,  // short_press_ms
+    1000, // long_press_ms
+    400   // double_click_ms
+};
+```
+
+v2 validates timing before activating runtime changes.
+
+The resolved timing must satisfy:
+
+```text
+short_press_ms > 0
+long_press_ms  > short_press_ms
+debounce_ms    <= short_press_ms
+double_click_ms >= debounce_ms
+```
+
+Runtime setters return `ButtonConfigResult`:
+
+```cpp
+const ButtonConfigResult result = buttons.setGlobalTiming(timing);
+
+if (!result)
+{
+    // Existing valid configuration remains active.
+}
+```
+
+Per-button overrides are validated after inheritance from the global values.
+
+---
+
+## Synchronization, reset and recovery
+
+A reusable input library must distinguish “clear my software state” from “invent a released hardware state.”
+
+### `sync()`
+
+```cpp
+buttons.sync();
+```
+
+Reads every enabled input and establishes the physical levels as the current baseline **without generating press/release events**.
+
+Use it when:
+
+- commissioning hardware;
+- changing an external reader;
+- changing electrical polarity;
+- entering a new operating mode where event history should restart from current reality.
+
+If a button is already held during synchronization, the stable level becomes pressed, but interaction classification is suppressed until that button is first released.
+
+That prevents a held input from becoming a synthetic “new press.”
+
+### `reconfigureAndSync()`
+
+This is an explicit alias that makes intent clear in runtime configuration code:
+
+```cpp
+buttons.reconfigureAndSync();
+```
+
+### `resetAndSync()`
+
+```cpp
+buttons.resetAndSync();
+```
+
+This:
+
+- clears queued interaction events;
+- clears transient interaction timers;
+- restores configured initial latch states;
+- reads the current hardware level;
+- establishes an edge-free baseline.
+
+### `reset()`
+
+The interface-level `reset()` now delegates to `resetAndSync()`.
+
+v2 deliberately does **not** assume that every physical button becomes released just because software was reset.
+
+### `invalidate()`
+
+Sometimes source health is known outside the reader callback—for example, a task refreshes an MCP23017 cache once and separately knows whether the I²C transaction succeeded.
+
+Use:
+
+```cpp
+buttons.invalidate(ButtonReadError::AcquisitionFailed);
+```
+
+This:
+
+- marks enabled inputs invalid;
+- retains stable levels;
+- cancels ambiguous interaction timing;
+- forces edge-free rebaseline on the next successful update.
+
+That is the right integration point for cached/health-supervised input providers.
+
+---
+
+## Per-button configuration
+
+A `ButtonPerConfig` can override timing and behavior:
+
+```cpp
+ButtonPerConfig horn{};
+horn.debounce_ms = 20;
+horn.short_press_ms = 100;
+horn.long_press_ms = 800;
+horn.double_click_ms = 300;
+horn.active_low = true;
+horn.enabled = true;
+
+buttons.setPerConfig(UB::config::ButtonIndex::Horn, horn);
+```
+
+A zero timing override means:
+
+> inherit the global setting.
+
+### Runtime configuration is synchronized
+
+Changing a reader, timing configuration or electrical polarity during an interaction can otherwise create fake edges or reinterpret a held level.
+
+v2 runtime configuration APIs therefore synchronize the affected input(s) before the change becomes active.
+
+If synchronization fails, the previous configuration is retained where possible and the operation reports failure.
 
 ---
 
 ## Latching
 
-Latching gives you a “sticky” ON/OFF state per button that changes only when a chosen press event occurs.
+Latching is optional and driven by **completed interactions**.
 
-### Latch modes
-
-- **Toggle**: flip ON↔OFF each time the trigger event happens
-- **Set**: force ON when the trigger event happens
-- **Reset**: force OFF when the trigger event happens
-
-### Latch triggers
-
-You decide which event drives latching:
-
-- `LatchTrigger::Short`
-- `LatchTrigger::Long`
-- `LatchTrigger::Double`
-
-This lets you build common UX patterns such as:
-
-- **Short to toggle** a feature
-- **Long to set** “armed/enabled”
-- **Double to reset** a state (or to toggle something “special”)
-
-### Why latching is applied on a finalized event
-
-A **Short** press may be temporarily held as “pending” while the handler waits to see if it becomes a **Double**.  
-So latching is applied only when the library knows the final event:
-
-- immediately for **Long** and **Double**
-- after the `double_click_ms` window expires for a **Short** that did _not_ become a Double
-
-This makes latching deterministic and avoids “short toggles then double toggles again” glitches.
-
-**Minimal latching setup example:**
+Example: toggle a latch after a double click.
 
 ```cpp
-ButtonPerConfig pc{};
-pc.latch_enabled = true;
-pc.latch_mode    = LatchMode::Toggle;
-pc.latch_on      = LatchTrigger::Short;
-pc.latch_initial = false;
+ButtonPerConfig mode{};
+mode.latch_enabled = true;
+mode.latch_mode = LatchMode::Toggle;
+mode.latch_on = LatchTrigger::Double;
 
-btns.setPerConfig(ButtonIndex::TestButton, pc);
+buttons.setPerConfig(UB::config::ButtonIndex::Mode, mode);
 ```
 
-Querying latch state:
+Read it with:
 
 ```cpp
-if (btns.isLatched(ButtonIndex::TestButton)) {
-  // feature is ON
-}
+buttons.isLatched(id);
+buttons.latchedMask();
 ```
 
-Edge detection (one-shot):
+Manual control:
 
 ```cpp
-if (btns.getAndClearLatchedChanged(ButtonIndex::TestButton)) {
-  Serial.println("Latch changed!");
-}
+buttons.setLatched(id, true);
+buttons.clearAllLatched();
+buttons.clearLatchedMask(mask);
 ```
 
-Global reset:
+For durable change detection:
 
 ```cpp
-// Global reset / system policy example:
-if (btns.getPressType(ButtonIndex::ResetButton) == ButtonPressType::Long) {
-  btns.clearAllLatched(); // clears all latched states
-}
+buttons.latchChangeSequence(id);
+```
 
-// Or force a specific latch:
-btns.setLatched(ButtonIndex::Headlights, false);
+The legacy clear-on-read helper remains available:
+
+```cpp
+buttons.getAndClearLatchedChanged(id);
 ```
 
 ---
 
-## Timing Model & TimeFn
+## Compile-time button mapping
 
-By default, the library timestamps with **`millis()`**. From v1.4.0, you can inject your own millisecond **time source** (e.g., FreeRTOS ticks) without changing the rest of your sketch.
+### v2 requires an explicit mapping
 
-### Ways to supply time
-
-1. **Setter (works with any factory):**
+When using the convenience umbrella header:
 
 ```cpp
-btns.setTimeFn([]() -> uint32_t {
-  return (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS);
-});
+#define BUTTON_LIST(X) \
+    X(Accelerator, 4)  \
+    X(Horn,        5)  \
+    X(Left,        6)  \
+    X(Right,       7)
+
+#include <Universal_Button.h>
 ```
 
-2. **Factory overloads (one‑liner):**
+If `BUTTON_LIST` is missing, compilation stops with a clear error.
+
+This replaces the old silent `TestButton = GPIO25` fallback.
+
+### Normal v2 namespace
+
+Generated configuration lives in:
 
 ```cpp
-static Button btns = makeButtons(
-  /*timing=*/{},
-  /*skipPinInit=*/false,
-  /*timeFn=*/[]() -> uint32_t { return (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS); });
+UB::config
 ```
 
-3. **Direct timestamped updates (no injected function):**
+For example:
 
 ```cpp
-void loop() {
-  const uint32_t now = (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS);
-  btns.update(now);
-}
+UB::config::ButtonIndex::Horn
+UB::config::ButtonPins::Horn
+UB::config::BUTTON_PINS
+UB::config::NUM_BUTTONS
 ```
 
-> If no `TimeFn` is provided in an Arduino build, the handler uses `millis()` internally. All debounce and press durations are measured on the chosen time base.
+This prevents the library's generated configuration from depending on global names.
 
-For non-Arduino builds, do not rely on the implicit `millis()` fallback. Provide `TimeFn` in the constructor/factory, call `setTimeFn()` before using `update()`, or call `update(now_ms)` directly with your own monotonic millisecond timestamp. Native GPIO fallback is also Arduino-only; non-Arduino builds should use `ReadPinFn`/`ReadFn` readers.
+### v1.x compatibility aliases
+
+For source compatibility during migration, the familiar names are still exported by default:
+
+```cpp
+ButtonIndex
+ButtonPins
+BUTTON_PINS
+NUM_BUTTONS
+```
+
+To enforce the clean v2 namespace:
+
+```cpp
+#define UB_NO_LEGACY_CONFIG_GLOBALS
+#define BUTTON_LIST(X) ...
+#include <Universal_Button.h>
+```
+
+New library/application code should prefer `UB::config::*`.
+
+### Explicit-pins path
+
+You do not need `BUTTON_LIST` when you use the core directly:
+
+```cpp
+#include <ButtonHandler.h>
+
+constexpr uint8_t pins[] = {4, 5};
+ButtonHandler<2> buttons(pins);
+```
+
+This is useful for libraries/adapters that should not depend on a project-global mapping macro.
 
 ---
 
-## API Reference
+## Port expanders and cached input
 
-### Types
+Universal_Button intentionally does not depend on a specific expander library.
 
-Declared in **`ButtonTypes.h`**:
-
-```cpp
-enum class ButtonPressType : uint8_t { None, Short, Long, Double };
-
-struct ButtonTimingConfig {
-  uint32_t debounce_ms;
-  uint32_t short_press_ms;
-  uint32_t long_press_ms;
-  uint32_t double_click_ms;
-
-  constexpr ButtonTimingConfig(
-    uint32_t debounce = 30,
-    uint32_t short_press = 200,
-    uint32_t long_press = 1000,
-    uint32_t double_click = 400);
-};
-
-enum class LatchMode : uint8_t { Toggle, Set, Reset };
-enum class LatchTrigger : uint8_t { Short, Long, Double };
-
-struct ButtonPerConfig {
-  uint16_t debounce_ms     = 0;   // 0 = use global
-  uint16_t short_press_ms  = 0;
-  uint16_t long_press_ms   = 0;
-  uint16_t double_click_ms = 0;
-  bool     active_low      = true;
-  bool     enabled         = true;
-
-  bool         latch_enabled = false;         // opt-in per button
-  LatchMode    latch_mode    = LatchMode::Toggle;
-  LatchTrigger latch_on      = LatchTrigger::Short;
-  bool         latch_initial = false;         // applied by reset() (and on construction)
-};
-```
-
-Per‑button overrides (ButtonPerConfig) are `uint16_t` for compact storage; global timings are `uint32_t`.
-
-### Interface: `IButtonHandler`
+### Simple expander callback
 
 ```cpp
-class IButtonHandler {
-public:
-  virtual ~IButtonHandler() noexcept = default;
-
-  // Update / timing
-  virtual void update() noexcept = 0;
-  virtual void update(uint32_t now_ms) noexcept = 0;
-
-  // Press state & events
-  [[nodiscard]] virtual bool isPressed(uint8_t id) const noexcept = 0;
-  virtual ButtonPressType getPressType(uint8_t id) noexcept = 0;
-  [[nodiscard]] virtual ButtonPressType peekPressType(uint8_t id) const noexcept;
-  [[nodiscard]] virtual uint32_t getLastPressDuration(uint8_t id) const noexcept { return 0U; }
-
-  // Lifecycle
-  virtual void reset() noexcept { }
-  [[nodiscard]] virtual uint8_t size() const noexcept = 0;
-
-  // Aggregates
-  [[nodiscard]] virtual uint32_t pressedMask() const noexcept;      // bit0..31
-  template <size_t N> void snapshot(UB::compat::bitset<N>& out) const noexcept;
-#if UB_HAS_STD_BITSET
-  template <size_t N> void snapshot(std::bitset<N>& out) const noexcept;
-#endif
-
-  // Latching (query / control / observation)
-  [[nodiscard]] virtual bool isLatched(uint8_t id) const noexcept { return false; }
-  virtual void setLatched(uint8_t id, bool on) noexcept { }
-  virtual void clearAllLatched() noexcept { }
-  virtual void clearLatchedMask(uint32_t mask) noexcept { }
-  [[nodiscard]] virtual uint32_t latchedMask() const noexcept;      // bit0..31
-  virtual bool getAndClearLatchedChanged(uint8_t id) noexcept { return false; }
-};
+static bool readFromMcp(uint8_t key)
+{
+    ...
+    return mcp.digitalRead(pin) == LOW;
+}
 ```
 
-`getPressType()` consumes the pending event; `peekPressType()` returns the same pending event without clearing it. This is useful when one part of your sketch wants to observe/log an event before another part handles it.
-
-`pressedMask()`/`latchedMask()` are 32-bit aggregates by design and only cover buttons `0..31`, even though `ButtonHandler<N>` supports up to 255 logical buttons. Use `snapshot()` or `forEach()` when you need all buttons.
-
-### Concrete: `ButtonHandler<N>`
-
-**Constructors (pointers, not std::function):**
+Because that callback returns **logical pressed state**, use:
 
 ```cpp
-// GPIO by default (LOW=pressed). Optionally skip pin init. Optional TimeFn.
-ButtonHandler(const uint8_t (&pins)[N],
-              ButtonTimingConfig timing = {},
-              bool skipPinInit = false,
-              uint32_t (*TimeFn)() = nullptr);
-
-// External per‑pin reader (bool(uint8_t)), optional TimeFn.
-ButtonHandler(const uint8_t (&pins)[N],
-              bool (*readPin)(uint8_t),
-              ButtonTimingConfig timing = {},
-              bool skipPinInit = true,
-              uint32_t (*TimeFn)() = nullptr);
-
-// Context‑aware reader (bool(void*, uint8_t)), optional TimeFn.
-ButtonHandler(const uint8_t (&pins)[N],
-              bool (*read)(void*, uint8_t), void* ctx,
-              ButtonTimingConfig timing = {},
-              bool skipPinInit = true,
-              uint32_t (*TimeFn)() = nullptr);
+makeButtonsWithReader(readFromMcp);
 ```
 
-**Core methods:**
+### Electrical-level expander callback
+
+If your callback returns the raw level instead:
 
 ```cpp
-// Update
-void update() noexcept;
-void update(uint32_t now) noexcept;
-
-// Press state & events
-[[nodiscard]] bool isPressed(uint8_t id) const noexcept;
-template <typename E> bool isPressed(E id) const noexcept;
-
-ButtonPressType getPressType(uint8_t id) noexcept;
-template <typename E> ButtonPressType getPressType(E id) noexcept;
-
-[[nodiscard]] ButtonPressType peekPressType(uint8_t id) const noexcept;
-template <typename E> [[nodiscard]] ButtonPressType peekPressType(E id) const noexcept;
-
-[[nodiscard]] uint32_t getLastPressDuration(uint8_t id) const noexcept;
-template <typename E> [[nodiscard]] uint32_t getLastPressDuration(E id) const noexcept;
-
-// Latching (query)
-[[nodiscard]] bool isLatched(uint8_t id) const noexcept;
-[[nodiscard]] uint32_t latchedMask() const noexcept;
-bool getAndClearLatchedChanged(uint8_t id) noexcept;
-
-// Lifecycle / sizing
-void reset() noexcept;
-[[nodiscard]] uint8_t size() const noexcept;
-static constexpr uint8_t sizeStatic() noexcept { return (uint8_t)N; }
-
-// Aggregates
-[[nodiscard]] uint32_t pressedMask() const noexcept;   // buttons 0..31 only
-template <size_t M> void snapshot(UB::compat::bitset<M>& out) const noexcept;
-#if UB_HAS_STD_BITSET
-template <size_t M> void snapshot(std::bitset<M>& out) const noexcept;
-#endif
-template <typename F> void forEach(F&& f) const noexcept; // f(index, pressed)
-
-// Force a specific latch state
-template <typename E> void setLatched(E b, bool on) noexcept;  // enum-friendly overload
-void setLatched(uint8_t id, bool on) noexcept; // interface-compatible overload
-
-// Clear latches
-void clearAllLatched() noexcept;
-void clearLatchedMask(uint32_t mask) noexcept; // bit i = button i, buttons 0..31 only
+static bool readMcpHigh(uint8_t key)
+{
+    return mcp.digitalRead(pin) == HIGH;
+}
 ```
 
-`ButtonHandler<N>` enforces `N <= 255` at compile time to match the `uint8_t` index/size API.
-
-**Runtime configuration:**
+use:
 
 ```cpp
-void setTiming(ButtonTimingConfig);            // alias of setGlobalTiming
-void setGlobalTiming(ButtonTimingConfig);
-void setPerConfig(uint8_t id, const ButtonPerConfig&); // cfg.enabled=false clears runtime + latch state
-template <typename E> void setPerConfig(E id, const ButtonPerConfig&);
-void enable(uint8_t id, bool en);              // disabling clears runtime + latch state
-template <typename E> void enable(E id, bool en);
-void setActiveLow(uint8_t id, bool activeLow);
-template <typename E> void setActiveLow(E id, bool activeLow);
-void setReadPinFn(bool (*readPin)(uint8_t));
-void setReadFn(bool (*read)(void*, uint8_t), void* ctx);
-void setTimeFn(uint32_t (*TimeFn)());
+makeButtonsWithElectricalReader(readMcpHigh);
 ```
 
-> **Note on latching and `setPerConfig()`:** `latch_initial` is applied during construction and `reset()`.  
-> If you change `latch_initial` at runtime and want it to take effect immediately, call `reset()` after `setPerConfig()`.
->
-> Disabling a button with `enable(id, false)` or `setPerConfig(id, cfg)` where `cfg.enabled=false` clears that button’s debouncer state, pending event, pending double-click, last duration, latched state, and latch-changed flag. Re-enabling starts from a clean OFF/unlatched state; `latch_initial` is applied again only by `reset()`.
+### Cached coherent reads
 
-### Factories (Easy Header)
+For a larger project, it is often better to acquire the expander once per cycle:
 
-Declared in **`Universal_Button.h`** (original factories kept; overloads add `timeFn` as the last arg):
+```text
+I²C transaction
+    ↓
+coherent 16-bit cache
+    ↓
+button callbacks read the cache
+    ↓
+Universal_Button debounce
+```
 
-- **Config‑driven alias:**
+If cache refresh fails, call `invalidate()` or use a validity-aware callback rather than manufacturing released inputs.
 
-  ```cpp
-  using Button = ButtonHandler<NUM_BUTTONS>;
-  Button makeButtons(ButtonTimingConfig t = {}, bool skipPinInit = false);
-  Button makeButtons(ButtonTimingConfig t, bool skipPinInit, Button::TimeFn timeFn); // overload
-  ```
+Example 05 demonstrates the cached approach.
 
-- **External reader (fast pointer):**
+---
 
-  ```cpp
-  Button makeButtonsWithReader(bool (*read)(uint8_t), ButtonTimingConfig t = {}, bool skipPinInit = true);
-  Button makeButtonsWithReader(bool (*read)(uint8_t), ButtonTimingConfig t, bool skipPinInit, Button::TimeFn timeFn); // overload
-  ```
+## API reference
 
-- **Context‑aware reader:**
+### Package version macros
 
-  ```cpp
-  Button makeButtonsWithReaderCtx(bool (*read)(void*, uint8_t), void* ctx, ButtonTimingConfig t = {}, bool skipPinInit = true);
-  Button makeButtonsWithReaderCtx(bool (*read)(void*, uint8_t), void* ctx, ButtonTimingConfig t, bool skipPinInit, Button::TimeFn timeFn); // overload
-  ```
+Use `UNIVERSAL_BUTTON_VERSION`, `UNIVERSAL_BUTTON_VERSION_MAJOR`, `UNIVERSAL_BUTTON_VERSION_MINOR`, and `UNIVERSAL_BUTTON_VERSION_PATCH`. Generic `LIBRARY_VERSION*` names are intentionally absent from this development baseline so version metadata cannot collide with another library.
 
-- **Explicit pins:**
-
-  ```cpp
-  template <size_t N>
-  ButtonHandler<N> makeButtonsWithPins(const uint8_t (&pins)[N], ButtonTimingConfig t = {}, bool skipPinInit = false);
-  template <size_t N>
-  ButtonHandler<N> makeButtonsWithPins(const uint8_t (&pins)[N], ButtonTimingConfig t, bool skipPinInit, typename ButtonHandler<N>::TimeFn timeFn); // overload
-
-  template <size_t N>
-  ButtonHandler<N> makeButtonsWithPinsAndReader(const uint8_t (&pins)[N], bool (*read)(uint8_t), ButtonTimingConfig t = {}, bool skipPinInit = true);
-  template <size_t N>
-  ButtonHandler<N> makeButtonsWithPinsAndReader(const uint8_t (&pins)[N], bool (*read)(uint8_t), ButtonTimingConfig t, bool skipPinInit, typename ButtonHandler<N>::TimeFn timeFn); // overload
-
-  template <size_t N>
-  ButtonHandler<N> makeButtonsWithPinsAndReaderCtx(const uint8_t (&pins)[N], bool (*read)(void*, uint8_t), void* ctx, ButtonTimingConfig t = {}, bool skipPinInit = true);
-  template <size_t N>
-  ButtonHandler<N> makeButtonsWithPinsAndReaderCtx(const uint8_t (&pins)[N], bool (*read)(void*, uint8_t), void* ctx, ButtonTimingConfig t, bool skipPinInit, typename ButtonHandler<N>::TimeFn timeFn); // overload
-  ```
-
-### Utils
-
-In **`Universal_Button_Utils.h`** (device‑agnostic):
+### Core lifecycle
 
 ```cpp
-namespace UB { namespace util {
-#ifndef UB_UTIL_NO_CONFIG_MAP
-  uint8_t indexFromKey(uint8_t key); // for config mapping (BUTTON_PINS/NUM_BUTTONS)
-#endif
+update();
+update(now_ms);
 
-  template <size_t N>
-  uint8_t indexFromKeyIn(const uint8_t (&pins)[N], uint8_t key); // for explicit pins arrays
-}}
+sync();
+sync(now_ms);
+reconfigureAndSync();
+resetAndSync();
+reset();
+invalidate();
 ```
 
-`indexFromKey(...)` and `indexFromKeyIn(...)` return `0xFF` when the key is not found.  
-Both utility mappers support up to 255 entries.
+### Stable state
 
-`pressedMask()`, `snapshot()`, and `forEach()` are available through `IButtonHandler`/`ButtonHandler<N>` and are independent of device/reader.
+```cpp
+isPressed(id);
+isLongHeld(id);
+pressedMask();
+snapshot(bitset);
+forEach(...);
+```
+
+### Completed interaction compatibility API
+
+```cpp
+getPressType(id);
+peekPressType(id);
+getLastPressDuration(id);
+```
+
+### Detailed event queue
+
+```cpp
+popEvent(event);
+peekEvent(event);
+pendingEventCount();
+eventSequence();
+droppedEventCount();
+eventOverflowed();
+clearEventOverflow();
+```
+
+### Input health
+
+```cpp
+configured();
+configError();
+valid();
+hasSample();
+
+valid(id);
+hasSample(id);
+sampleMs(id);
+sequence(id);
+changeSequence(id);
+generation(id);
+inputStatus(id);
+status();
+```
+
+### Configuration
+
+```cpp
+setGlobalTiming(...);
+setTiming(...);
+setPerConfig(...);
+enable(...);
+setActiveLow(...);
+setTimeFn(...);
+```
+
+### Reader replacement
+
+Logical pressed-state:
+
+```cpp
+setReadPinFn(...);
+setReadFn(...);
+setReadResultPinFn(...);
+setReadResultFn(...);
+```
+
+Electrical HIGH/LOW:
+
+```cpp
+setElectricalReadPinFn(...);
+setElectricalReadFn(...);
+setElectricalReadResultPinFn(...);
+setElectricalReadResultFn(...);
+```
+
+### Latching
+
+```cpp
+isLatched(id);
+setLatched(id, state);
+clearAllLatched();
+clearLatchedMask(mask);
+latchedMask();
+getAndClearLatchedChanged(id);
+latchChangeSequence(id);
+```
 
 ---
 
 ## Examples
 
-- **01_Basic_Button** – single button pressed state
-- **02_Press_Type** – short/long/**double** press events
-- **03_Local_Enum** – enum mapping
-- **04_Port_Expander** – external reader (MCP)
-- **05_Cached_Read** – cached bus snapshot
-- **06_Latching** – multi-button latching demo (toggle/set/reset + event-driven triggers)
+The example progression remains intentionally small.
 
-(The `02_Press_Type` example includes a `Double` case and shows an optional per‑button `double_click_ms` override.)
+### 01_BasicButton
+
+The shortest path from wiring to a debounced `isPressed()` result.
+
+### 02_PressType
+
+Short, long and double-click classification using the simple compatibility API.
+
+### 03_LocalEnum
+
+Shows how to use `ButtonHandler<N>` directly with an explicit local enum and pins array, without `BUTTON_LIST`.
+
+### 04_PortExpander
+
+Uses an MCP23017 callback as the input source.
+
+### 05_CachedRead
+
+Reads both MCP23017 ports once per loop and serves button reads from the coherent cache.
+
+### 06_Latching
+
+Shows toggle/set/reset-style latched behavior.
+
+The examples are intended to teach the public API, not every advanced diagnostic feature. The remainder of this README is the technical reference.
 
 ---
 
-## Mixed Inputs (GPIO + Expander)
+## Testing
 
-Build a **composite reader** and set `skipPinInit=true`. Manually call `pinMode(INPUT_PULLUP)` for GPIO pins, and configure expander pins on the device. The library needs no changes—just route each key to the right source in your reader.
+The repository has a dedicated `test/` directory rather than using an old `platformio.ci.ini` pattern.
 
----
+Run the complete host-side validation suite with:
 
-## Performance Notes
-
-- **GPIO** reads are O(1) and cheap—no caching needed.
-- **I²C/SPI expanders**: consider cached snapshots to reduce bus traffic and get coherent “chord” readings (A+B together).
-- The debounce algorithm is independent of the reader; call `update()` at a steady cadence (e.g., every 5–10 ms).
-- Double‑click adds only O(1) per‑button state and zero heap allocations.
-- Latching adds two `UB::compat::bitset<N>` fields (latched state + “changed” edge flag) and is updated only on finalized events. Latch control APIs update the same bitsets and only run when you call them (no extra work in `update()`).
-
----
-
-## FAQ
-
-**Q: How do I override timings for just one button?**  
-Create a `ButtonPerConfig`, set non‑zero fields, and call `setPerConfig(id, cfg)`. Zeros fall back to global.
-
-**Q: How do I revert to global timing?**  
-Set the per‑button field back to `0` (e.g., `double_click_ms = 0`).
-
-**Q: What happens if I disable a button at runtime?**  
-`enable(id, false)` clears that button’s debouncer state, pending event, pending double-click, last duration, latched state, and latch-changed flag.
-`setPerConfig(id, cfg)` behaves the same when `cfg.enabled = false`. Re-enabling starts clean; call `reset()` if you want `latch_initial` applied again.
-
-**Q: Do I need `setTimeFn()` on Arduino?**  
-No — `millis()` is default.
-
-**Q: Can I use this outside Arduino?**
-Yes for the core debouncer/event logic, but use adapter mode: provide a reader (`ReadPinFn`/`ReadFn`) and a `TimeFn`, or call `update(now_ms)`. Native GPIO fallback (`pinMode`, `digitalRead`, `millis`) is Arduino-only.
-
-**Q: Does a long press contribute to a double‑click?**  
-No. A double consists of **two short** presses; long presses are reported as `Long` and don’t combine with a pending single.
-
-**Q: Why does my Short event feel “delayed” when double-click is enabled?**  
-Because the library waits up to `double_click_ms` to see if that Short becomes a Double. If no second short arrives, the Short is emitted when the window expires.
-
-**Q: How do I enable latching for one button?**  
-Set latching fields in `ButtonPerConfig` and apply them with `setPerConfig()`:
-
-```cpp
-ButtonPerConfig pc{};
-pc.latch_enabled = true;
-pc.latch_mode    = LatchMode::Toggle;
-pc.latch_on      = LatchTrigger::Short;
-pc.latch_initial = false;
-btns.setPerConfig(ButtonIndex::TestButton, pc);
+```bash
+./test/run_host_checks.sh
 ```
 
-**Q: How do I detect a latch edge (changed since last time)?**  
-Use `getAndClearLatchedChanged(id)` as a one-shot flag:
+Individual gates are also available:
 
-```cpp
-if (btns.getAndClearLatchedChanged(ButtonIndex::TestButton)) {
-  // latch changed since last check
-}
+```bash
+./test/run_native_tests.sh
+CXX=clang++ ./test/run_native_tests.sh
+./test/run_sanitizers.sh
+./test/check_examples_host.sh
+./test/check_release_contracts.sh
 ```
 
-**Q: When does `latch_initial` apply?**  
-It is applied by `reset()` (and at construction). This makes initial latch state deterministic after a reboot/reset. If you change `latch_initial` at runtime and want it applied immediately, call `reset()` after `setPerConfig()`.
+The deterministic suite covers:
 
-**Q: How do I clear all latches (global reset)?**
-Use `clearAllLatched()` (often triggered by a long-press on a reset button).
+- the original callback-polarity defect;
+- logical vs electrical reader truth tables;
+- active-low and active-high handling;
+- checked read failure and recovery;
+- externally reported source invalidation;
+- missing-reader behavior;
+- bounce/debounce;
+- exact short/long threshold boundaries;
+- double-click timing;
+- LongStarted vs LongReleased;
+- held-state semantics;
+- event preservation;
+- queue overflow/loss diagnostics;
+- reset/sync behavior;
+- runtime reader reconfiguration;
+- timing validation;
+- per-button timing;
+- latching and durable latch changes;
+- `millis()` rollover;
+- multiple-button independence;
+- freshness/change sequences;
+- malformed indices;
+- PW_PVT-style context callbacks;
+- complete small state truth tables.
 
-**Q: Can I force a latch ON/OFF from code?**
-Yes — `setLatched(button, true/false)` updates latch state without generating a press event, and sets the “latched changed” flag.
-
-**Q: Is there a maximum button count?**  
-Yes. `ButtonHandler<N>` currently enforces `N <= 255` because the public index and size API is `uint8_t`.
-
-**Q: Are pressed/latch masks full-width for all buttons?**  
-No. `pressedMask()`, `latchedMask()`, and `clearLatchedMask()` use 32-bit masks and represent buttons `0..31` only. `ButtonHandler<N>` can manage up to 255 buttons; use `snapshot()` or `forEach()` for wider sets.
-
-**Q: Can I inspect an event without consuming it?**
-Yes. Use `peekPressType(id)` to read the pending event without clearing it. Use `getPressType(id)` when you are ready to consume it.
+The GitHub Actions matrix separately compiles portable usage across the supported board families and compiles the public examples for ESP32-S3.
 
 ---
 
-## Compatibility Testing
+## Migrating from v1.7.x
 
-All examples are regularly compiled across supported platforms using PlatformIO.
+v2.0.0 is intentionally a major release because two previously ambiguous behaviors are corrected rather than preserved forever.
 
-Before each release, run a full environment matrix (for example):  
-`pio run -e esp32-s3-devkitc-1 -e esp8266_nodemcuv2 -e pico -e mkrzero -e nano_every -e uno -e teensy41 -e bluepill_f103c8`
+### 1. Explicit `BUTTON_LIST` is mandatory with `Universal_Button.h`
+
+**v1.x:** missing mapping silently created a GPIO25 `TestButton`.
+
+**v2:** compilation fails with a clear message.
+
+If you do not want a mapping macro, include `ButtonHandler.h` directly and pass an explicit pins array.
+
+### 2. Callback readers now follow their documented contract
+
+**v1.x documentation:** callback returns `true` when pressed.
+
+**v1.x implementation:** that result was polarity-transformed again.
+
+**v2:** `makeButtonsWithReader(...)` means exactly what it says—`true` is pressed.
+
+If your old callback actually returned raw electrical HIGH/LOW, migrate it to:
+
+```cpp
+makeButtonsWithElectricalReader(...)
+```
+
+### 3. Events are queued instead of stored in one slot
+
+`getPressType()` still works for simple sketches.
+
+For production applications, prefer `popEvent()` and monitor overflow/sequence metadata.
+
+### 4. Long press now has two explicit moments
+
+- `LongStarted`: threshold reached while held;
+- `LongReleased`: completed long interaction on release.
+
+`ButtonPressType::Long` remains release-based for compatibility.
+
+### 5. `reset()` synchronizes current hardware
+
+v2 no longer assumes reset means every physical button is released.
+
+For a known external hardware/source failure, use:
+
+```cpp
+invalidate();
+```
+
+and let the next valid acquisition rebaseline safely.
+
+### 6. Canonical generated mapping is namespaced
+
+Prefer:
+
+```cpp
+UB::config::ButtonIndex
+UB::config::NUM_BUTTONS
+```
+
+Legacy global aliases remain available unless `UB_NO_LEGACY_CONFIG_GLOBALS` is defined.
 
 ---
 
-## Contributing / Issues
+## PW_PVT-style integration
 
-If you encounter issues on unsupported platforms, please include:
+Universal_Button remains independent of PW_PVT, but v2's contracts are designed to fit a mature provider architecture cleanly.
 
-- Board name
-- Core version
-- PlatformIO / Arduino IDE version
-- Minimal repro sketch
+A useful adapter shape is:
+
+```text
+MCP23017 / hardware cache
+       ↓
+source-health result
+       ↓
+Universal_Button
+       ├── stable level
+       ├── valid / sample_ms / sequence
+       ├── change_sequence / generation
+       └── bounded interaction events
+                 ↓
+application adapter / transport
+                 ↓
+SafetyCore / AuthorityRouter / UI logic
+```
+
+### Stable button state
+
+A latest-state transport such as SnapshotBus should carry stable debounced state and durable metadata.
+
+It should **not** rely on a one-cycle event bit surviving scheduling delays.
+
+### Interaction events
+
+If every event must be delivered, consume Universal_Button's queue into an application event queue, notification, journal or monotonic counters.
+
+### External MCP health
+
+If a cache-refresh task knows the MCP23017 transaction failed, it can call:
+
+```cpp
+buttons.invalidate(ButtonReadError::AcquisitionFailed);
+```
+
+When the cache becomes healthy again, the next `update()` rebaselines without generating fake edges.
+
+This keeps hardware health in the adapter and button semantics in the library.
+
+---
+
+## Limitations and design notes
+
+### The event queue is bounded
+
+This is intentional. Embedded systems should have explicit resource and overflow behavior.
+
+Increase `UB_EVENT_QUEUE_CAPACITY` if your application legitimately allows a larger consumer delay, or drain events into an application-level queue.
+
+### Plain bool callbacks cannot report hardware failure
+
+Use a result reader or `invalidate()` when the hardware/source has an independent health signal.
+
+### Button acquisition is per button
+
+Universal_Button calls the configured reader once per enabled logical button during `update()`.
+
+If several contacts must represent one coherent hardware snapshot, acquire/cache that snapshot outside the library first, as shown by Example 05.
+
+### This is not a safety policy
+
+Input validity helps a safety architecture make a correct decision, but the library does not decide whether motion/power is permitted.
+
+### `ButtonPressType::Long` remains release-based
+
+That is deliberate for compatibility. Use `isLongHeld()` or `ButtonEventType::LongStarted` for threshold-time behavior.
+
+---
+
+## Repository structure
+
+```text
+Universal_Button/
+├── .github/workflows/ci.yml
+├── examples/
+│   ├── 01_BasicButton/
+│   ├── 02_PressType/
+│   ├── 03_LocalEnum/
+│   ├── 04_PortExpander/
+│   ├── 05_CachedRead/
+│   └── 06_Latching/
+├── src/
+│   ├── ButtonCompatibility.h
+│   ├── ButtonHandler.h
+│   ├── ButtonHandler_Config.h
+│   ├── ButtonTypes.h
+│   ├── IButtonHandler.h
+│   ├── Universal_Button.h
+│   └── Universal_Button_Utils.h
+├── test/
+│   ├── host_stubs/
+│   ├── portable_compile/
+│   ├── test_button_handler.cpp
+│   └── test scripts...
+├── CHANGELOG.md
+├── RELEASE_CHECKLIST.md
+├── keywords.txt
+├── library.json
+├── library.properties
+├── LICENSE
+├── platformio.ini
+└── README.md
+```
+
+---
+
+## Version history
+
+Current version:
+
+```text
+2.0.0
+```
+
+See [CHANGELOG.md](CHANGELOG.md) for detailed release history.
 
 ---
 
 ## License
 
-MIT © Little Man Builds
+Universal_Button is released under the **MIT License**. See [LICENSE](LICENSE).
 
-Contributions welcome! Please keep Doxygen comments consistent with the interface and follow the established naming conventions.
+Copyright © 2026 Little Man Builds.

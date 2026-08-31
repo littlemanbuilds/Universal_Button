@@ -5,14 +5,14 @@
  *
  * @file IButtonHandler.h
  * @author Little Man Builds (Darren Osborne)
- * @date 2025-08-05
+ * @date 2026-08-07
  * @copyright Copyright © 2026 Little Man Builds
  */
 
 #pragma once
 
-#include <ButtonTypes.h>
-#include <ButtonCompatibility.h>
+#include "ButtonTypes.h"
+#include "ButtonCompatibility.h"
 
 /**
  * @brief Abstract interface for button event handlers.
@@ -40,7 +40,7 @@ public:
      * @param buttonId Index of button.
      * @return True if button is pressed.
      */
-    [[nodiscard]] virtual bool isPressed(uint8_t buttonId) const noexcept = 0;
+    UB_NODISCARD virtual bool isPressed(uint8_t buttonId) const noexcept = 0;
 
     /**
      * @brief Get and consume press event for a button.
@@ -54,15 +54,16 @@ public:
      * @param buttonId Index of button.
      * @return ButtonPressType Event type: Short, Long, Double, or None.
      */
-    [[nodiscard]] virtual ButtonPressType peekPressType(uint8_t /*buttonId*/) const noexcept { return ButtonPressType::None; }
+    UB_NODISCARD virtual ButtonPressType peekPressType(uint8_t /*buttonId*/) const noexcept { return ButtonPressType::None; }
 
     /**
      * @brief Exact duration (ms) of the most recent completed press.
      */
-    [[nodiscard]] virtual uint32_t getLastPressDuration(uint8_t /*buttonId*/) const noexcept { return 0U; }
+    UB_NODISCARD virtual uint32_t getLastPressDuration(uint8_t /*buttonId*/) const noexcept { return 0U; }
 
     /**
-     * @brief Reset internal debouncer state and clear pending events.
+     * @brief Reset handler-specific runtime state.
+     * @note Concrete implementations may synchronize current hardware rather than assume a released level.
      */
     virtual void reset() noexcept { /* no-op by default */ }
 
@@ -70,13 +71,13 @@ public:
      * @brief Number of logical buttons managed by this handler.
      * @return Count of buttons (0–255).
      */
-    [[nodiscard]] virtual uint8_t size() const noexcept = 0;
+    UB_NODISCARD virtual uint8_t size() const noexcept = 0;
 
     /**
      * @brief Build a 32-bit pressed mask (bit i == 1 iff button i is pressed).
      * @note Only buttons 0..31 are represented. Use snapshot()/forEach() for wider handlers.
      */
-    [[nodiscard]] virtual uint32_t pressedMask() const noexcept
+    UB_NODISCARD virtual uint32_t pressedMask() const noexcept
     {
         uint32_t m = 0;
         for (uint8_t i = 0; i < size() && i < 32; ++i)
@@ -124,7 +125,7 @@ public:
      * @return True if the button is currently pressed; false otherwise.
      */
     template <typename E, UB::compat::enable_if_t<UB::compat::is_enum<E>::value, int> = 0>
-    [[nodiscard]] bool isPressed(E buttonId) const noexcept
+    UB_NODISCARD bool isPressed(E buttonId) const noexcept
     {
         return isPressed(static_cast<uint8_t>(buttonId));
     }
@@ -148,7 +149,7 @@ public:
      * @return Pending press type (short, long, double, etc.).
      */
     template <typename E, UB::compat::enable_if_t<UB::compat::is_enum<E>::value, int> = 0>
-    [[nodiscard]] ButtonPressType peekPressType(E buttonId) const noexcept
+    UB_NODISCARD ButtonPressType peekPressType(E buttonId) const noexcept
     {
         return peekPressType(static_cast<uint8_t>(buttonId));
     }
@@ -160,7 +161,7 @@ public:
      * @return Duration of the last press in milliseconds.
      */
     template <typename E, UB::compat::enable_if_t<UB::compat::is_enum<E>::value, int> = 0>
-    [[nodiscard]] uint32_t getLastPressDuration(E buttonId) const noexcept
+    UB_NODISCARD uint32_t getLastPressDuration(E buttonId) const noexcept
     {
         return getLastPressDuration(static_cast<uint8_t>(buttonId));
     }
@@ -172,7 +173,7 @@ public:
      * @return True if the button is latched ON; false otherwise.
      */
     template <typename E, UB::compat::enable_if_t<UB::compat::is_enum<E>::value, int> = 0>
-    [[nodiscard]] bool isLatched(E buttonId) const noexcept
+    UB_NODISCARD bool isLatched(E buttonId) const noexcept
     {
         return isLatched(static_cast<uint8_t>(buttonId));
     }
@@ -194,7 +195,7 @@ public:
      * @param buttonId Index of button.
      * @return True if latched ON; false otherwise.
      */
-    [[nodiscard]] virtual bool isLatched(uint8_t /*buttonId*/) const noexcept { return false; }
+    UB_NODISCARD virtual bool isLatched(uint8_t /*buttonId*/) const noexcept { return false; }
 
     /**
      * @brief Force the latched state for a button.
@@ -219,7 +220,7 @@ public:
      * @return Bitmask where bit i is set when button i is latched ON (up to 32 buttons).
      * @note Only buttons 0..31 are represented. Use isLatched()/forEach-style loops for wider handlers.
      */
-    [[nodiscard]] virtual uint32_t latchedMask() const noexcept
+    UB_NODISCARD virtual uint32_t latchedMask() const noexcept
     {
         uint32_t m = 0;
         for (uint8_t i = 0; i < size() && i < 32; ++i)

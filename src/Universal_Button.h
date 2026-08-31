@@ -1,40 +1,40 @@
 /**
  * MIT License
  *
- * @brief Public umbrella header for the Universal_Button library.
+ * @brief Public umbrella header and convenience factories for Universal_Button.
  *
  * @file Universal_Button.h
  * @author Little Man Builds (Darren Osborne)
- * @date 2025-08-05
+ * @date 2026-08-07
  * @copyright Copyright © 2026 Little Man Builds
  */
 
 #pragma once
 
-#include <ButtonHandler_Config.h>
-#include <ButtonHandler.h>
+#include "ButtonHandler_Config.h"
+#include "ButtonHandler.h"
+#include "ButtonTypes.h"
 
-// ---- Version macro ---- //
+// ---- Version ---- //
 
-#define UNIVERSAL_BUTTON_VERSION "1.7.0"
+#define UNIVERSAL_BUTTON_VERSION "2.0.0"
+#define UNIVERSAL_BUTTON_VERSION_MAJOR 2
+#define UNIVERSAL_BUTTON_VERSION_MINOR 0
+#define UNIVERSAL_BUTTON_VERSION_PATCH 0
 
-// ---- Aliases ---- //
+// ---- Config-driven alias ---- //
 
-using Button = ButtonHandler<NUM_BUTTONS>;
+using Button = ButtonHandler<UB::config::NUM_BUTTONS>;
 
-// ---- Native GPIO readers (active-low with INPUT_PULLUP) ---- //
+// ---- Native GPIO ---- //
 
 /**
- * @brief Zero-boilerplate factory with an explicit pins array.
- *
- * Initializes pins to INPUT_PULLUP by default and treats digitalRead(pin)==LOW
- * as "pressed" (active-low). Set skipPinInit=true if pins are configured elsewhere.
- *
- * @tparam N Number of buttons (deduced from pins).
- * @param pins Reference to an array of length N with pin IDs.
- * @param timing Global debounce/press-duration configuration.
- * @param skipPinInit If true, GPIO mode is NOT configured in this factory.
- * @return A ready-to-use ButtonHandler<N>.
+ * @brief Construct a handler from an explicit array of native GPIO pins.
+ * @tparam N Number of buttons deduced from @p pins.
+ * @param pins Pin array.
+ * @param timing Global interaction timing.
+ * @param skipPinInit True when pinMode is owned elsewhere.
+ * @return Ready-to-use ButtonHandler<N>.
  */
 template <size_t N>
 inline ButtonHandler<N> makeButtonsWithPins(const uint8_t (&pins)[N],
@@ -45,54 +45,29 @@ inline ButtonHandler<N> makeButtonsWithPins(const uint8_t (&pins)[N],
 }
 
 /**
- * @brief Config-driven factory (uses BUTTON_PINS / NUM_BUTTONS).
- *
- * Initializes pins to INPUT_PULLUP by default and treats digitalRead(pin)==LOW
- * as "pressed" (active-low). Set skipPinInit=true if pins are configured elsewhere.
- *
- * @param timing Global debounce/press-duration configuration.
- * @param skipPinInit If true, GPIO mode is NOT configured in this factory.
- * @return A ready-to-use Button.
+ * @brief Config-driven native GPIO factory using UB::config::BUTTON_PINS.
  */
 inline Button makeButtons(ButtonTimingConfig timing = {}, bool skipPinInit = false)
 {
-    return Button(BUTTON_PINS, timing, skipPinInit);
+    return Button(UB::config::BUTTON_PINS, timing, skipPinInit);
 }
 
-// ---- External readers (function-pointer fast path) ---- //
+// ---- Logical pressed-state readers ---- //
 
 /**
- * @brief Config-driven factory with an external function-pointer reader.
- *
- * Use when button states come from a source other than native GPIO (e.g., a
- * port expander). The read function must return true when the identified
- * key is currently pressed (already polarity-corrected for your hardware).
- *
- * @param read Reader: bool(uint8_t id) → pressed?
- * @param timing Global debounce/press-duration configuration.
- * @param skipPinInit If true, pinMode is not called for BUTTON_PINS.
- * @return A Button sized by NUM_BUTTONS.
+ * @brief Config-driven factory for a logical pressed-state callback.
+ * @param read Reader returning true when the identified button is physically pressed.
+ * @note v2 applies no polarity transform to this callback. Use an electrical reader factory
+ *       when the callback returns HIGH/LOW instead of logical pressed state.
  */
 inline Button makeButtonsWithReader(bool (*read)(uint8_t),
                                     ButtonTimingConfig timing = {},
                                     bool skipPinInit = true)
 {
-    return Button(BUTTON_PINS, read, timing, skipPinInit);
+    return Button(UB::config::BUTTON_PINS, read, timing, skipPinInit);
 }
 
-/**
- * @brief Explicit-pins factory with an external function-pointer reader.
- *
- * Same as makeButtonsWithReader, but you provide the pins array explicitly
- * instead of using the config mapping.
- *
- * @tparam N Number of buttons (deduced from pins).
- * @param pins Reference to an array of length N with key IDs.
- * @param read Reader: bool(uint8_t id) → pressed?
- * @param timing Global debounce/press-duration configuration.
- * @param skipPinInit If true, pinMode is not called for pins.
- * @return A ButtonHandler<N>.
- */
+/** @brief Explicit-pins form of makeButtonsWithReader(). */
 template <size_t N>
 inline ButtonHandler<N> makeButtonsWithPinsAndReader(const uint8_t (&pins)[N],
                                                      bool (*read)(uint8_t),
@@ -102,63 +77,152 @@ inline ButtonHandler<N> makeButtonsWithPinsAndReader(const uint8_t (&pins)[N],
     return ButtonHandler<N>(pins, read, timing, skipPinInit);
 }
 
-// ---- External readers (context-aware callback) ---- //
-
-/**
- * @brief Config-driven factory with a context-aware reader callback.
- *
- * Useful for devices that require a handle/context (e.g., I²C expanders,
- * SPI shift registers, or driver classes). The read function must return
- * true when the identified key is currently pressed (already polarity-
- * corrected for your hardware).
- *
- * @param read Reader: bool(void* ctx, uint8_t id) → pressed?
- * @param ctx Opaque pointer passed back to read on each call.
- * @param timing Global debounce/press-duration configuration.
- * @param skipPinInit If true, pinMode is not called for BUTTON_PINS.
- * @return A Button sized by NUM_BUTTONS.
- */
-inline Button makeButtonsWithReaderCtx(bool (*read)(void *, uint8_t), void *ctx,
+/** @brief Config-driven context-aware logical pressed-state callback factory. */
+inline Button makeButtonsWithReaderCtx(bool (*read)(void *, uint8_t),
+                                       void *ctx,
                                        ButtonTimingConfig timing = {},
                                        bool skipPinInit = true)
 {
-    return Button(BUTTON_PINS, read, ctx, timing, skipPinInit);
+    return Button(UB::config::BUTTON_PINS, read, ctx, timing, skipPinInit);
 }
 
-/**
- * @brief Explicit-pins factory with a context-aware reader callback.
- *
- * Same as makeButtonsWithReaderCtx, but you provide the pins array explicitly
- * instead of using the config mapping.
- *
- * @tparam N Number of buttons (deduced from pins).
- * @param pins Reference to an array of length N with key IDs.
- * @param read Reader: bool(void* ctx, uint8_t id) → pressed?
- * @param ctx Opaque pointer passed back to read on each call.
- * @param timing Global debounce/press-duration configuration.
- * @param skipPinInit If true, pinMode is not called for pins.
- * @return A ButtonHandler<N>.
- */
+/** @brief Explicit-pins context-aware logical pressed-state callback factory. */
 template <size_t N>
 inline ButtonHandler<N> makeButtonsWithPinsAndReaderCtx(const uint8_t (&pins)[N],
-                                                        bool (*read)(void *, uint8_t), void *ctx,
+                                                        bool (*read)(void *, uint8_t),
+                                                        void *ctx,
                                                         ButtonTimingConfig timing = {},
                                                         bool skipPinInit = true)
 {
     return ButtonHandler<N>(pins, read, ctx, timing, skipPinInit);
 }
 
-// ---- Time-source overloads (useful for RTOS or non-Arduino adapter mode) ---- //
+// ---- Validity-aware logical pressed-state readers ---- //
+
+/** @brief Config-driven validity-aware logical pressed-state reader factory. */
+inline Button makeButtonsWithResultReader(ButtonPressedResult (*read)(uint8_t),
+                                          ButtonTimingConfig timing = {},
+                                          bool skipPinInit = true)
+{
+    return Button(UB::config::BUTTON_PINS, read, timing, skipPinInit);
+}
+
+/** @brief Explicit-pins validity-aware logical pressed-state reader factory. */
+template <size_t N>
+inline ButtonHandler<N> makeButtonsWithPinsAndResultReader(const uint8_t (&pins)[N],
+                                                           ButtonPressedResult (*read)(uint8_t),
+                                                           ButtonTimingConfig timing = {},
+                                                           bool skipPinInit = true)
+{
+    return ButtonHandler<N>(pins, read, timing, skipPinInit);
+}
+
+/** @brief Config-driven context-aware validity-aware logical pressed-state reader factory. */
+inline Button makeButtonsWithResultReaderCtx(ButtonPressedResult (*read)(void *, uint8_t),
+                                             void *ctx,
+                                             ButtonTimingConfig timing = {},
+                                             bool skipPinInit = true)
+{
+    return Button(UB::config::BUTTON_PINS, read, ctx, timing, skipPinInit);
+}
+
+/** @brief Explicit-pins context-aware validity-aware logical pressed-state reader factory. */
+template <size_t N>
+inline ButtonHandler<N> makeButtonsWithPinsAndResultReaderCtx(const uint8_t (&pins)[N],
+                                                              ButtonPressedResult (*read)(void *, uint8_t),
+                                                              void *ctx,
+                                                              ButtonTimingConfig timing = {},
+                                                              bool skipPinInit = true)
+{
+    return ButtonHandler<N>(pins, read, ctx, timing, skipPinInit);
+}
+
+// ---- Electrical HIGH/LOW readers ---- //
 
 /**
- * @brief Zero-boilerplate factory with explicit pins and optional time source.
- *
- * @tparam N Number of buttons (deduced from pins).
- * @param pins Reference to an array of length N with pin IDs.
- * @param timing Global debounce/press-duration configuration.
- * @param skipPinInit If true, GPIO mode is NOT configured in this factory.
- * @param timeFn Optional time source (ms). nullptr uses millis() on Arduino; non-Arduino users should supply one.
- * @return A ready-to-use ButtonHandler<N>.
+ * @brief Config-driven electrical-level reader factory.
+ * @param read Reader returning true for HIGH and false for LOW.
+ * @note ButtonPerConfig::active_low converts electrical level into logical pressed state.
+ */
+inline Button makeButtonsWithElectricalReader(bool (*read)(uint8_t),
+                                              ButtonTimingConfig timing = {},
+                                              bool skipPinInit = true)
+{
+    return Button(UB::config::BUTTON_PINS, BUTTON_ELECTRICAL_READER, read, timing, skipPinInit);
+}
+
+/** @brief Explicit-pins electrical-level reader factory. */
+template <size_t N>
+inline ButtonHandler<N> makeButtonsWithPinsAndElectricalReader(const uint8_t (&pins)[N],
+                                                               bool (*read)(uint8_t),
+                                                               ButtonTimingConfig timing = {},
+                                                               bool skipPinInit = true)
+{
+    return ButtonHandler<N>(pins, BUTTON_ELECTRICAL_READER, read, timing, skipPinInit);
+}
+
+/** @brief Config-driven context-aware electrical-level reader factory. */
+inline Button makeButtonsWithElectricalReaderCtx(bool (*read)(void *, uint8_t),
+                                                 void *ctx,
+                                                 ButtonTimingConfig timing = {},
+                                                 bool skipPinInit = true)
+{
+    return Button(UB::config::BUTTON_PINS, BUTTON_ELECTRICAL_READER, read, ctx, timing, skipPinInit);
+}
+
+/** @brief Explicit-pins context-aware electrical-level reader factory. */
+template <size_t N>
+inline ButtonHandler<N> makeButtonsWithPinsAndElectricalReaderCtx(const uint8_t (&pins)[N],
+                                                                  bool (*read)(void *, uint8_t),
+                                                                  void *ctx,
+                                                                  ButtonTimingConfig timing = {},
+                                                                  bool skipPinInit = true)
+{
+    return ButtonHandler<N>(pins, BUTTON_ELECTRICAL_READER, read, ctx, timing, skipPinInit);
+}
+
+/** @brief Config-driven validity-aware electrical-level reader factory. */
+inline Button makeButtonsWithElectricalResultReader(ButtonLevelResult (*read)(uint8_t),
+                                                    ButtonTimingConfig timing = {},
+                                                    bool skipPinInit = true)
+{
+    return Button(UB::config::BUTTON_PINS, BUTTON_ELECTRICAL_READER, read, timing, skipPinInit);
+}
+
+/** @brief Explicit-pins validity-aware electrical-level reader factory. */
+template <size_t N>
+inline ButtonHandler<N> makeButtonsWithPinsAndElectricalResultReader(const uint8_t (&pins)[N],
+                                                                     ButtonLevelResult (*read)(uint8_t),
+                                                                     ButtonTimingConfig timing = {},
+                                                                     bool skipPinInit = true)
+{
+    return ButtonHandler<N>(pins, BUTTON_ELECTRICAL_READER, read, timing, skipPinInit);
+}
+
+/** @brief Config-driven context-aware validity-aware electrical-level reader factory. */
+inline Button makeButtonsWithElectricalResultReaderCtx(ButtonLevelResult (*read)(void *, uint8_t),
+                                                       void *ctx,
+                                                       ButtonTimingConfig timing = {},
+                                                       bool skipPinInit = true)
+{
+    return Button(UB::config::BUTTON_PINS, BUTTON_ELECTRICAL_READER, read, ctx, timing, skipPinInit);
+}
+
+/** @brief Explicit-pins context-aware validity-aware electrical-level reader factory. */
+template <size_t N>
+inline ButtonHandler<N> makeButtonsWithPinsAndElectricalResultReaderCtx(const uint8_t (&pins)[N],
+                                                                        ButtonLevelResult (*read)(void *, uint8_t),
+                                                                        void *ctx,
+                                                                        ButtonTimingConfig timing = {},
+                                                                        bool skipPinInit = true)
+{
+    return ButtonHandler<N>(pins, BUTTON_ELECTRICAL_READER, read, ctx, timing, skipPinInit);
+}
+
+// ---- Time-source overloads retained from v1.x ---- //
+
+/**
+ * @brief Explicit-pins native GPIO factory using a custom millisecond time source.
  */
 template <size_t N>
 inline ButtonHandler<N> makeButtonsWithPins(const uint8_t (&pins)[N],
@@ -170,45 +234,26 @@ inline ButtonHandler<N> makeButtonsWithPins(const uint8_t (&pins)[N],
 }
 
 /**
- * @brief Config-driven factory with optional time source (uses BUTTON_PINS).
- *
- * @param timing Global debounce/press-duration configuration.
- * @param skipPinInit If true, GPIO mode is NOT configured in this factory.
- * @param timeFn Optional time source (ms). nullptr uses millis() on Arduino; non-Arduino users should supply one.
- * @return A ready-to-use Button.
+ * @brief Config-driven native GPIO factory using a custom millisecond time source.
  */
 inline Button makeButtons(ButtonTimingConfig timing, bool skipPinInit, Button::TimeFn timeFn)
 {
-    return Button(BUTTON_PINS, timing, skipPinInit, timeFn);
+    return Button(UB::config::BUTTON_PINS, timing, skipPinInit, timeFn);
 }
 
 /**
- * @brief Config-driven factory with external fast reader and optional time source.
- *
- * @param read Reader: bool(uint8_t id) → pressed?
- * @param timing Global debounce/press-duration configuration.
- * @param skipPinInit If true, pinMode is not called for BUTTON_PINS.
- * @param timeFn Optional time source (ms). nullptr uses millis() on Arduino; non-Arduino users should supply one.
- * @return A Button sized by NUM_BUTTONS.
+ * @brief Config-driven logical pressed-state reader factory using a custom time source.
  */
 inline Button makeButtonsWithReader(bool (*read)(uint8_t),
                                     ButtonTimingConfig timing,
                                     bool skipPinInit,
                                     Button::TimeFn timeFn)
 {
-    return Button(BUTTON_PINS, read, timing, skipPinInit, timeFn);
+    return Button(UB::config::BUTTON_PINS, read, timing, skipPinInit, timeFn);
 }
 
 /**
- * @brief Explicit-pins factory with external fast reader and optional time source.
- *
- * @tparam N Number of buttons (deduced from pins).
- * @param pins Reference to an array of length N with key IDs.
- * @param read Reader: bool(uint8_t id) → pressed?
- * @param timing Global debounce/press-duration configuration.
- * @param skipPinInit If true, pinMode is not called for pins.
- * @param timeFn Optional time source (ms). nullptr uses millis() on Arduino; non-Arduino users should supply one.
- * @return A ButtonHandler<N>.
+ * @brief Explicit-pins logical pressed-state reader factory using a custom time source.
  */
 template <size_t N>
 inline ButtonHandler<N> makeButtonsWithPinsAndReader(const uint8_t (&pins)[N],
@@ -221,41 +266,177 @@ inline ButtonHandler<N> makeButtonsWithPinsAndReader(const uint8_t (&pins)[N],
 }
 
 /**
- * @brief Config-driven factory with context-aware reader and optional time source.
- *
- * @param read Reader: bool(void* ctx, uint8_t id) → pressed?
- * @param ctx Opaque pointer passed back to read on each call.
- * @param timing Global debounce/press-duration configuration.
- * @param skipPinInit If true, pinMode is not called for BUTTON_PINS.
- * @param timeFn Optional time source (ms). nullptr uses millis() on Arduino; non-Arduino users should supply one.
- * @return A Button sized by NUM_BUTTONS.
+ * @brief Config-driven context logical pressed-state reader factory using a custom time source.
  */
-inline Button makeButtonsWithReaderCtx(bool (*read)(void *, uint8_t), void *ctx,
+inline Button makeButtonsWithReaderCtx(bool (*read)(void *, uint8_t),
+                                       void *ctx,
                                        ButtonTimingConfig timing,
                                        bool skipPinInit,
                                        Button::TimeFn timeFn)
 {
-    return Button(BUTTON_PINS, read, ctx, timing, skipPinInit, timeFn);
+    return Button(UB::config::BUTTON_PINS, read, ctx, timing, skipPinInit, timeFn);
 }
 
 /**
- * @brief Explicit-pins factory with context-aware reader and optional time source.
- *
- * @tparam N Number of buttons (deduced from pins).
- * @param pins Reference to an array of length N with key IDs.
- * @param read Reader: bool(void* ctx, uint8_t id) → pressed?
- * @param ctx Opaque pointer passed back to read on each call.
- * @param timing Global debounce/press-duration configuration.
- * @param skipPinInit If true, pinMode is not called for pins.
- * @param timeFn Optional time source (ms). nullptr uses millis() on Arduino; non-Arduino users should supply one.
- * @return A ButtonHandler<N>.
+ * @brief Explicit-pins context logical pressed-state reader factory using a custom time source.
  */
 template <size_t N>
 inline ButtonHandler<N> makeButtonsWithPinsAndReaderCtx(const uint8_t (&pins)[N],
-                                                        bool (*read)(void *, uint8_t), void *ctx,
+                                                        bool (*read)(void *, uint8_t),
+                                                        void *ctx,
                                                         ButtonTimingConfig timing,
                                                         bool skipPinInit,
                                                         typename ButtonHandler<N>::TimeFn timeFn)
 {
     return ButtonHandler<N>(pins, read, ctx, timing, skipPinInit, timeFn);
+}
+
+/**
+ * @brief Config-driven validity-aware logical reader factory using a custom time source.
+ */
+inline Button makeButtonsWithResultReader(ButtonPressedResult (*read)(uint8_t),
+                                          ButtonTimingConfig timing,
+                                          bool skipPinInit,
+                                          Button::TimeFn timeFn)
+{
+    return Button(UB::config::BUTTON_PINS, read, timing, skipPinInit, timeFn);
+}
+
+/**
+ * @brief Explicit-pins validity-aware logical reader factory using a custom time source.
+ */
+template <size_t N>
+inline ButtonHandler<N> makeButtonsWithPinsAndResultReader(const uint8_t (&pins)[N],
+                                                           ButtonPressedResult (*read)(uint8_t),
+                                                           ButtonTimingConfig timing,
+                                                           bool skipPinInit,
+                                                           typename ButtonHandler<N>::TimeFn timeFn)
+{
+    return ButtonHandler<N>(pins, read, timing, skipPinInit, timeFn);
+}
+
+/**
+ * @brief Config-driven context validity-aware logical reader factory using a custom time source.
+ */
+inline Button makeButtonsWithResultReaderCtx(ButtonPressedResult (*read)(void *, uint8_t),
+                                             void *ctx,
+                                             ButtonTimingConfig timing,
+                                             bool skipPinInit,
+                                             Button::TimeFn timeFn)
+{
+    return Button(UB::config::BUTTON_PINS, read, ctx, timing, skipPinInit, timeFn);
+}
+
+/**
+ * @brief Explicit-pins context validity-aware logical reader factory using a custom time source.
+ */
+template <size_t N>
+inline ButtonHandler<N> makeButtonsWithPinsAndResultReaderCtx(const uint8_t (&pins)[N],
+                                                              ButtonPressedResult (*read)(void *, uint8_t),
+                                                              void *ctx,
+                                                              ButtonTimingConfig timing,
+                                                              bool skipPinInit,
+                                                              typename ButtonHandler<N>::TimeFn timeFn)
+{
+    return ButtonHandler<N>(pins, read, ctx, timing, skipPinInit, timeFn);
+}
+
+/**
+ * @brief Config-driven electrical-level reader factory using a custom time source.
+ */
+inline Button makeButtonsWithElectricalReader(bool (*read)(uint8_t),
+                                              ButtonTimingConfig timing,
+                                              bool skipPinInit,
+                                              Button::TimeFn timeFn)
+{
+    return Button(UB::config::BUTTON_PINS, BUTTON_ELECTRICAL_READER, read, timing, skipPinInit, timeFn);
+}
+
+/**
+ * @brief Explicit-pins electrical-level reader factory using a custom time source.
+ */
+template <size_t N>
+inline ButtonHandler<N> makeButtonsWithPinsAndElectricalReader(const uint8_t (&pins)[N],
+                                                               bool (*read)(uint8_t),
+                                                               ButtonTimingConfig timing,
+                                                               bool skipPinInit,
+                                                               typename ButtonHandler<N>::TimeFn timeFn)
+{
+    return ButtonHandler<N>(pins, BUTTON_ELECTRICAL_READER, read, timing, skipPinInit, timeFn);
+}
+
+/**
+ * @brief Config-driven context electrical-level reader factory using a custom time source.
+ */
+inline Button makeButtonsWithElectricalReaderCtx(bool (*read)(void *, uint8_t),
+                                                 void *ctx,
+                                                 ButtonTimingConfig timing,
+                                                 bool skipPinInit,
+                                                 Button::TimeFn timeFn)
+{
+    return Button(UB::config::BUTTON_PINS, BUTTON_ELECTRICAL_READER, read, ctx, timing, skipPinInit, timeFn);
+}
+
+/**
+ * @brief Explicit-pins context electrical-level reader factory using a custom time source.
+ */
+template <size_t N>
+inline ButtonHandler<N> makeButtonsWithPinsAndElectricalReaderCtx(const uint8_t (&pins)[N],
+                                                                  bool (*read)(void *, uint8_t),
+                                                                  void *ctx,
+                                                                  ButtonTimingConfig timing,
+                                                                  bool skipPinInit,
+                                                                  typename ButtonHandler<N>::TimeFn timeFn)
+{
+    return ButtonHandler<N>(pins, BUTTON_ELECTRICAL_READER, read, ctx, timing, skipPinInit, timeFn);
+}
+
+/**
+ * @brief Config-driven validity-aware electrical-level reader factory using a custom time source.
+ */
+inline Button makeButtonsWithElectricalResultReader(ButtonLevelResult (*read)(uint8_t),
+                                                    ButtonTimingConfig timing,
+                                                    bool skipPinInit,
+                                                    Button::TimeFn timeFn)
+{
+    return Button(UB::config::BUTTON_PINS, BUTTON_ELECTRICAL_READER, read, timing, skipPinInit, timeFn);
+}
+
+/**
+ * @brief Explicit-pins validity-aware electrical-level reader factory using a custom time source.
+ */
+template <size_t N>
+inline ButtonHandler<N> makeButtonsWithPinsAndElectricalResultReader(const uint8_t (&pins)[N],
+                                                                     ButtonLevelResult (*read)(uint8_t),
+                                                                     ButtonTimingConfig timing,
+                                                                     bool skipPinInit,
+                                                                     typename ButtonHandler<N>::TimeFn timeFn)
+{
+    return ButtonHandler<N>(pins, BUTTON_ELECTRICAL_READER, read, timing, skipPinInit, timeFn);
+}
+
+/**
+ * @brief Config-driven context validity-aware electrical-level reader factory using a custom time source.
+ */
+inline Button makeButtonsWithElectricalResultReaderCtx(ButtonLevelResult (*read)(void *, uint8_t),
+                                                       void *ctx,
+                                                       ButtonTimingConfig timing,
+                                                       bool skipPinInit,
+                                                       Button::TimeFn timeFn)
+{
+    return Button(UB::config::BUTTON_PINS, BUTTON_ELECTRICAL_READER, read, ctx, timing, skipPinInit, timeFn);
+}
+
+/**
+ * @brief Explicit-pins context validity-aware electrical-level reader factory using a custom time source.
+ */
+template <size_t N>
+inline ButtonHandler<N> makeButtonsWithPinsAndElectricalResultReaderCtx(const uint8_t (&pins)[N],
+                                                                        ButtonLevelResult (*read)(void *, uint8_t),
+                                                                        void *ctx,
+                                                                        ButtonTimingConfig timing,
+                                                                        bool skipPinInit,
+                                                                        typename ButtonHandler<N>::TimeFn timeFn)
+{
+    return ButtonHandler<N>(pins, BUTTON_ELECTRICAL_READER, read, ctx, timing, skipPinInit, timeFn);
 }
