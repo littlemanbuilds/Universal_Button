@@ -2,6 +2,17 @@
 
 All notable changes to Universal_Button are documented here.
 
+## [2.0.2] - 2026-09-09
+
+### Fixed
+
+- Default legacy `BUTTON_PINS` aliases now link safely when the mapping header is included in multiple translation units, retaining C++11 compatibility and reference identity with each local configuration array.
+
+### Changed
+
+- Sanitizer validation verifies fatal error detection with negative probes under the same settings as the runtime suite.
+- Host validation begins with GCC/Clang compile, link and execution checks for default and opt-out mapping APIs across C++11/14/17/20/23.
+
 ## [2.0.1] - 2026-09-09
 
 ### Fixed

@@ -31,6 +31,10 @@ CLANG_CXX="${CLANG_CXX:-clang++}"
 clang_macros=$("$CLANG_CXX" -dM -E -x c++ /dev/null) || { echo "FAIL: Clang is required" >&2; exit 1; }
 [[ "$clang_macros" == *"#define __clang__ "* ]] || { echo "FAIL: CLANG_CXX must select Clang" >&2; exit 1; }
 
+echo "[host] Early default/opt-out linkage: GCC and Clang"
+CXX="$GCC_CXX" bash "$ROOT/test/check_linkage.sh"
+CXX="$CLANG_CXX" bash "$ROOT/test/check_linkage.sh"
+
 echo "[host] GNU GCC: $GCC_CXX"
 CXX="$GCC_CXX" bash "$ROOT/test/run_native_tests.sh"
 echo "[host] Clang: $CLANG_CXX"

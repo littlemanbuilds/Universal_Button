@@ -18,7 +18,7 @@ Universal_Button handles the repetitive parts of button input that become surpri
 
 ESP32-S3 is the primary development target, but the core remains intentionally portable.
 
-**2.0.1 fixes durable latch-change accounting during disable and reset.** Reader, event and synchronization features introduced in 2.0.0 remain available.
+**2.0.2 fixes default mapping linkage in multi-file applications.** The latch accounting fixes from 2.0.1 and reader, event and synchronization features from 2.0.0 remain available.
 
 > **Since v2.0.0:** if you include `Universal_Button.h`, you must explicitly define your button mapping. The old silent GPIO25 fallback has been removed.
 
@@ -141,7 +141,7 @@ Add the library to your project dependencies:
 
 ```ini
 lib_deps =
-    littlemanbuilds/Universal_Button@^2.0.1
+    littlemanbuilds/Universal_Button@^2.0.2
 ```
 
 ### Manual installation
@@ -816,6 +816,8 @@ BUTTON_PINS
 NUM_BUTTONS
 ```
 
+`BUTTON_PINS` is a constexpr reference to the `UB::config::BUTTON_PINS` array in the same translation unit. Each translation unit owns a distinct array; the alias adds no copy and does not provide one program-wide address. Use the same `BUTTON_LIST` definition across files sharing the convenience API. This remains supported in C++11 and later.
+
 To enforce the clean v2 namespace:
 
 ```cpp
@@ -1276,7 +1278,7 @@ Universal_Button/
 Current version:
 
 ```text
-2.0.1
+2.0.2
 ```
 
 See [CHANGELOG.md](CHANGELOG.md) for detailed release history.

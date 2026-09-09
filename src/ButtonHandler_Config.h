@@ -68,6 +68,7 @@ namespace UB
 #ifndef UB_NO_LEGACY_CONFIG_GLOBALS
 using ButtonPins = UB::config::ButtonPins;
 using ButtonIndex = UB::config::ButtonIndex;
-constexpr const uint8_t (&BUTTON_PINS)[UB::config::NUM_BUTTONS] = UB::config::BUTTON_PINS;
+// Keep the reference local, like its backing array, in every supported C++ standard.
+static constexpr const uint8_t (&BUTTON_PINS)[UB::config::NUM_BUTTONS] = UB::config::BUTTON_PINS;
 constexpr size_t NUM_BUTTONS = UB::config::NUM_BUTTONS;
 #endif

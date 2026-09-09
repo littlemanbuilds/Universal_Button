@@ -1,6 +1,6 @@
 # Universal_Button Release Checklist
 
-Use this checklist before publishing 2.0.1. Unchecked physical, CI and archive checks still require release validation.
+Use this checklist template before publishing 2.0.2. Unchecked physical, CI and archive checks still require release validation.
 
 ## Source and API
 
@@ -27,6 +27,7 @@ Use this checklist before publishing 2.0.1. Unchecked physical, CI and archive c
 ## Validation
 
 - [ ] `./test/run_host_checks.sh` requires GNU GCC, Clang, ASan and UBSan, with no skipped capabilities.
+- [ ] Early default and opt-out multi-file mapping checks compile, link and execute with GCC and Clang.
 - [ ] `./test/run_native_tests.sh`
 - [ ] `CXX=clang++ ./test/run_native_tests.sh`
 - [ ] `./test/run_sanitizers.sh`
