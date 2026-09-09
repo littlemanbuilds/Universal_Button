@@ -12,4 +12,4 @@ if [[ "$(uname -s)" == "Darwin" && -z "${ASAN_OPTIONS:-}" ]]; then
 fi
 ASAN_OPTIONS="$ASAN_OPTS" "$BUILD/test_button_handler_asan"
 "$CXX" "${COMMON[@]}" -fsanitize=undefined -I"$ROOT/src" "$ROOT/test/test_button_handler.cpp" -o "$BUILD/test_button_handler_ubsan"
-UBSAN_OPTIONS=print_stacktrace=1 "$BUILD/test_button_handler_ubsan"
+UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 "$BUILD/test_button_handler_ubsan"

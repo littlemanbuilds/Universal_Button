@@ -32,11 +32,14 @@ public:
 
     /**
      * @brief Scan and process button states using a provided timestamp (ms).
+     *
+     * @param now_ms Current millisecond timestamp.
      */
     virtual void update(uint32_t now_ms) noexcept = 0;
 
     /**
      * @brief Get debounced state of button.
+     *
      * @param buttonId Index of button.
      * @return True if button is pressed.
      */
@@ -44,6 +47,7 @@ public:
 
     /**
      * @brief Get and consume press event for a button.
+     *
      * @param buttonId Index of button.
      * @return ButtonPressType Event type: Short, Long, Double, or None.
      */
@@ -51,6 +55,7 @@ public:
 
     /**
      * @brief Peek at the pending press event for a button without consuming it.
+     *
      * @param buttonId Index of button.
      * @return ButtonPressType Event type: Short, Long, Double, or None.
      */
@@ -58,24 +63,30 @@ public:
 
     /**
      * @brief Exact duration (ms) of the most recent completed press.
+     *
+     * @return Last completed press duration in milliseconds; the default implementation returns zero.
      */
     UB_NODISCARD virtual uint32_t getLastPressDuration(uint8_t /*buttonId*/) const noexcept { return 0U; }
 
     /**
      * @brief Reset handler-specific runtime state.
+     *
      * @note Concrete implementations may synchronize current hardware rather than assume a released level.
      */
     virtual void reset() noexcept { /* no-op by default */ }
 
     /**
      * @brief Number of logical buttons managed by this handler.
+     *
      * @return Count of buttons (0–255).
      */
     UB_NODISCARD virtual uint8_t size() const noexcept = 0;
 
     /**
      * @brief Build a 32-bit pressed mask (bit i == 1 iff button i is pressed).
+     *
      * @note Only buttons 0..31 are represented. Use snapshot()/forEach() for wider handlers.
+     * @return Mask of pressed buttons 0..31; higher button indices are omitted.
      */
     UB_NODISCARD virtual uint32_t pressedMask() const noexcept
     {
@@ -88,8 +99,9 @@ public:
 
     /**
      * @brief Write the current debounced state into a compat bitset (bit i == pressed).
+     *
      * @tparam N Size of the destination bitset.
-     * @param out Destination bitset; bits beyond size() remain unchanged/false.
+     * @param out Destination bitset; bits beyond size() are cleared.
      */
     template <size_t N>
     void snapshot(UB::compat::bitset<N> &out) const noexcept
@@ -103,8 +115,9 @@ public:
 #if UB_HAS_STD_BITSET
     /**
      * @brief Write the current debounced state into a std::bitset (bit i == pressed).
+     *
      * @tparam N Size of the destination bitset.
-     * @param out Destination bitset; bits beyond size() remain unchanged/false.
+     * @param out Destination bitset; bits beyond size() are cleared.
      */
     template <size_t N>
     void snapshot(std::bitset<N> &out) const noexcept
@@ -120,6 +133,7 @@ public:
 
     /**
      * @brief Query whether a button is currently pressed using an enum identifier.
+     *
      * @tparam E Enum type representing button IDs.
      * @param buttonId Button identifier (enum value).
      * @return True if the button is currently pressed; false otherwise.
@@ -132,6 +146,7 @@ public:
 
     /**
      * @brief Get the most recent press type of a button using an enum identifier.
+     *
      * @tparam E Enum type representing button IDs.
      * @param buttonId Button identifier (enum value).
      * @return Last detected press type (short, long, double, etc.).
@@ -144,6 +159,7 @@ public:
 
     /**
      * @brief Peek at the pending press type using an enum identifier, without consuming it.
+     *
      * @tparam E Enum type representing button IDs.
      * @param buttonId Button identifier (enum value).
      * @return Pending press type (short, long, double, etc.).
@@ -156,6 +172,7 @@ public:
 
     /**
      * @brief Get the duration of the most recent button press using an enum identifier.
+     *
      * @tparam E Enum type representing button IDs.
      * @param buttonId Button identifier (enum value).
      * @return Duration of the last press in milliseconds.
@@ -168,6 +185,7 @@ public:
 
     /**
      * @brief Query the current latched state of a button using an enum identifier.
+     *
      * @tparam E Enum type representing button IDs.
      * @param buttonId Button identifier (enum value).
      * @return True if the button is latched ON; false otherwise.
@@ -180,6 +198,7 @@ public:
 
     /**
      * @brief Query and clear the latched-change flag using an enum identifier.
+     *
      * @tparam E Enum type representing button IDs.
      * @param buttonId Button identifier (enum value).
      * @return True if the latched state changed since last query; false otherwise.
@@ -192,6 +211,7 @@ public:
 
     /**
      * @brief Query the current latched state of a button.
+     *
      * @param buttonId Index of button.
      * @return True if latched ON; false otherwise.
      */
@@ -199,6 +219,7 @@ public:
 
     /**
      * @brief Force the latched state for a button.
+     *
      * @param b  Button index.
      * @param on Desired latched state (true = ON, false = OFF).
      */
@@ -211,12 +232,14 @@ public:
 
     /**
      * @brief Clear a subset of latched states using a bitmask.
+     *
      * @param mask Bitmask of button indices to clear (bit0 = button 0, etc.; buttons 0..31 only).
      */
     virtual void clearLatchedMask(uint32_t /*mask*/) noexcept {}
 
     /**
      * @brief Build a 32-bit latched mask.
+     *
      * @return Bitmask where bit i is set when button i is latched ON (up to 32 buttons).
      * @note Only buttons 0..31 are represented. Use isLatched()/forEach-style loops for wider handlers.
      */
@@ -231,6 +254,7 @@ public:
 
     /**
      * @brief Edge flag for latching: true if latched state changed since the last clear.
+     *
      * @param buttonId Index of button.
      * @return True if the latched state changed since the previous call.
      */

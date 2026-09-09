@@ -16,6 +16,8 @@
     X(TestButton2, 7)  \
     X(TestButton3, 8)
 
+// Use the namespaced mapping without duplicate legacy global names.
+#define UB_NO_LEGACY_CONFIG_GLOBALS
 #include <Universal_Button.h>
 #include <Universal_Button_Utils.h>
 
@@ -23,19 +25,19 @@
 #include <Wire.h>
 #include <Adafruit_MCP23X17.h>
 
-namespace ubcfg = UB::config; ///< Shorter name for the button list above.
+using namespace UB::config;
 
 // MCP23017 wiring/config.
 constexpr uint8_t MCP_ADDR = 0x20; ///< I2C address (A2..A0 = 000 -> 0x20). Adjust if you strap address pins.
 
 // Map each logical button (by enum order) to MCP pin 0..15 (0..7=A, 8..15=B).
-constexpr uint8_t MCP_PINS[ubcfg::NUM_BUTTONS] = {
+constexpr uint8_t MCP_PINS[NUM_BUTTONS] = {
     0, ///< TestButton1 -> GPA0.
     1, ///< TestButton2 -> GPA1.
     8  ///< TestButton3 -> GPB0.
 };
-static_assert(ubcfg::NUM_BUTTONS == (sizeof(MCP_PINS) / sizeof(MCP_PINS[0])),
-              "MCP_PINS size must match ubcfg::NUM_BUTTONS");
+static_assert(NUM_BUTTONS == (sizeof(MCP_PINS) / sizeof(MCP_PINS[0])),
+              "MCP_PINS size must match NUM_BUTTONS");
 
 // Custom timing (debounce, short, long) in milliseconds.
 constexpr ButtonTimingConfig kTiming{50, 300, 1500};
@@ -49,7 +51,7 @@ static Adafruit_MCP23X17 mcp;
 static bool readFromMcp(uint8_t key)
 {
     const uint8_t idx = UB::util::indexFromKey(key);
-    if (idx < ubcfg::NUM_BUTTONS)
+    if (idx < NUM_BUTTONS)
     {
         return mcp.digitalRead(MCP_PINS[idx]) == LOW;
     }
@@ -62,7 +64,7 @@ static Button btns = makeButtonsWithReader(readFromMcp, kTiming, /*skipPinInit=*
 // Configure MCP button pins once.
 static void configureMcpPins()
 {
-    for (uint8_t i = 0; i < ubcfg::NUM_BUTTONS; ++i)
+    for (size_t i = 0; i < NUM_BUTTONS; ++i)
     {
         const uint8_t p = MCP_PINS[i];
         mcp.pinMode(p, INPUT_PULLUP);
@@ -95,9 +97,9 @@ void loop()
     btns.update();
 
     // Read/consume events for each button.
-    const ButtonPressType btn1 = btns.getPressType(ubcfg::ButtonIndex::TestButton1);
-    const ButtonPressType btn2 = btns.getPressType(ubcfg::ButtonIndex::TestButton2);
-    const ButtonPressType btn3 = btns.getPressType(ubcfg::ButtonIndex::TestButton3);
+    const ButtonPressType btn1 = btns.getPressType(ButtonIndex::TestButton1);
+    const ButtonPressType btn2 = btns.getPressType(ButtonIndex::TestButton2);
+    const ButtonPressType btn3 = btns.getPressType(ButtonIndex::TestButton3);
 
     if (btn1 == ButtonPressType::Short)
         Serial.println("TestButton1: Short press...");

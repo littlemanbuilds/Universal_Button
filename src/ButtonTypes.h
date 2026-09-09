@@ -73,6 +73,13 @@ enum class ButtonReadError : uint8_t
  */
 struct ButtonPressedResult
 {
+    /**
+     * @brief Store a logical sample and its acquisition result; defaults to invalid.
+     *
+     * @param p Logical state: true means pressed.
+     * @param v True when the sample value is trustworthy.
+     * @param e Failure reason when v is false; stored as supplied.
+     */
     constexpr ButtonPressedResult(bool p = false, bool v = false, ButtonReadError e = ButtonReadError::AcquisitionFailed) noexcept
         : pressed(p), valid(v), error(e) {}
 
@@ -82,6 +89,7 @@ struct ButtonPressedResult
 
     /**
      * @brief Construct a successful logical pressed-state result.
+     *
      * @param value Logical pressed state.
      * @return Successful result.
      */
@@ -92,6 +100,7 @@ struct ButtonPressedResult
 
     /**
      * @brief Construct a failed logical pressed-state result.
+     *
      * @param why Failure reason.
      * @return Failed result.
      */
@@ -106,6 +115,13 @@ struct ButtonPressedResult
  */
 struct ButtonLevelResult
 {
+    /**
+     * @brief Store an electrical sample and its acquisition result; defaults to invalid.
+     *
+     * @param h Electrical state: true means HIGH.
+     * @param v True when the sample value is trustworthy.
+     * @param e Failure reason when v is false; stored as supplied.
+     */
     constexpr ButtonLevelResult(bool h = false, bool v = false, ButtonReadError e = ButtonReadError::AcquisitionFailed) noexcept
         : high(h), valid(v), error(e) {}
 
@@ -115,6 +131,7 @@ struct ButtonLevelResult
 
     /**
      * @brief Construct a successful electrical-level result.
+     *
      * @param value Electrical level where true means HIGH.
      * @return Successful result.
      */
@@ -125,6 +142,7 @@ struct ButtonLevelResult
 
     /**
      * @brief Construct a failed electrical-level result.
+     *
      * @param why Failure reason.
      * @return Failed result.
      */
@@ -153,6 +171,13 @@ enum class ButtonConfigError : uint8_t
  */
 struct ButtonConfigResult
 {
+    /**
+     * @brief Store the outcome of a configuration request.
+     *
+     * @param success True when the configuration request succeeded.
+     * @param e Validation or synchronization failure reason.
+     * @param id Affected button index, or 0xFF for a global result.
+     */
     constexpr ButtonConfigResult(bool success = true, ButtonConfigError e = ButtonConfigError::None, uint8_t id = 0xFFu) noexcept
         : ok(success), error(e), button_id(id) {}
 
@@ -160,7 +185,11 @@ struct ButtonConfigResult
     ButtonConfigError error{ButtonConfigError::None}; ///< Validation failure when @ref ok is false.
     uint8_t button_id{0xFFu};                         ///< Affected button, or 0xFF for global configuration.
 
-    /** @brief Allow concise `if (result)` checks. */
+    /**
+     * @brief Allow concise `if (result)` checks.
+     *
+     * @return True when the configuration request succeeded.
+     */
     constexpr explicit operator bool() const noexcept { return ok; }
 };
 
@@ -186,6 +215,14 @@ struct ButtonTimingConfig
     uint32_t long_press_ms;   ///< Hold time at which LongStarted becomes true/emitted.
     uint32_t double_click_ms; ///< Maximum first-release → second-release interval for a double click.
 
+    /**
+     * @brief Set global timing thresholds in milliseconds; validation occurs in the handler.
+     *
+     * @param debounce Minimum stable level interval in milliseconds.
+     * @param short_press Minimum short-press duration in milliseconds.
+     * @param long_press Long-press threshold in milliseconds.
+     * @param double_click Maximum interval between first and second short releases in milliseconds.
+     */
     constexpr ButtonTimingConfig(uint32_t debounce = 30,
                                  uint32_t short_press = 200,
                                  uint32_t long_press = 1000,
@@ -237,7 +274,7 @@ struct ButtonInputStatus
     uint32_t sample_sequence{0};                                ///< Successful acquisition counter.
     uint32_t change_sequence{0};                                ///< Debounced level-transition counter.
     uint32_t generation{0};                                     ///< Edge-free synchronization generation.
-    uint32_t latch_change_sequence{0};                          ///< Latched-state transition counter.
+    uint32_t latch_change_sequence{0};                          ///< Runtime latch transitions modulo 2^32, including disable/reset; never cleared by reset.
 };
 
 /**

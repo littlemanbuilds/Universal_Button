@@ -18,7 +18,9 @@ Universal_Button handles the repetitive parts of button input that become surpri
 
 ESP32-S3 is the primary development target, but the core remains intentionally portable.
 
-> **v2.0.0 changes one important rule:** if you include `Universal_Button.h`, you must explicitly define your button mapping. The old silent GPIO25 fallback has been removed.
+**2.0.1 fixes durable latch-change accounting during disable and reset.** Reader, event and synchronization features introduced in 2.0.0 remain available.
+
+> **Since v2.0.0:** if you include `Universal_Button.h`, you must explicitly define your button mapping. The old silent GPIO25 fallback has been removed.
 
 ---
 
@@ -44,7 +46,7 @@ ESP32-S3 is the primary development target, but the core remains intentionally p
 18. [Testing](#testing)
 19. [API reference](#api-reference)
 20. [Migrating from v1.7.x](#migrating-from-v17x)
-21. [PW_PVT-style integration](#pw_pvt-style-integration)
+21. [Application integration](#application-integration)
 22. [Repository structure](#repository-structure)
 23. [Limitations and design notes](#limitations-and-design-notes)
 24. [Version history](#version-history)
@@ -113,7 +115,7 @@ Universal_Button intentionally **does**:
 Universal_Button intentionally **does not**:
 
 - own an application task;
-- depend on SnapshotBus, SwitchBank, NVMKit, SafetyCore or PW_PVT;
+- depend on an application transport, persistence layer or safety controller;
 - persist configuration;
 - decide whether a button is allowed to move a vehicle;
 - turn one-shot interaction events into a system-wide event bus;
@@ -139,7 +141,7 @@ Add the library to your project dependencies:
 
 ```ini
 lib_deps =
-    littlemanbuilds/Universal_Button@^2.0.0
+    littlemanbuilds/Universal_Button@^2.0.1
 ```
 
 ### Manual installation
@@ -652,7 +654,8 @@ This:
 
 - clears queued interaction events;
 - clears transient interaction timers;
-- restores configured initial latch states;
+- restores configured initial latch states, counting actual transitions in the durable latch sequence;
+- clears consumable latch-change flags;
 - reads the current hardware level;
 - establishes an edge-free baseline.
 
@@ -749,11 +752,17 @@ For durable change detection:
 buttons.latchChangeSequence(id);
 ```
 
+Each consumer can compare the sequence with its own saved value. It starts at zero on construction and advances once per actual latch transition, modulo 2^32. The same value is available in `inputStatus(id).latch_change_sequence`. Reset never clears this counter.
+
+Disabling clears the latch; reset restores `latch_initial`. Both count actual changes even if subsequent synchronization fails. Unchanged values produce no transition. These controls do not synthesize interaction events: disable retains queued events, while reset clears the queue.
+
 The legacy clear-on-read helper remains available:
 
 ```cpp
 buttons.getAndClearLatchedChanged(id);
 ```
+
+This flag reports changes since it was last consumed or cleared by lifecycle cleanup. Disable cleanup and reset clear it even when the durable sequence advances. Manual `setLatched()` and clear operations set the flag only for actual changes.
 
 ---
 
@@ -1044,6 +1053,8 @@ Run the complete host-side validation suite with:
 ./test/run_host_checks.sh
 ```
 
+The complete suite requires genuine GNU GCC, Clang, AddressSanitizer and UndefinedBehaviorSanitizer; unavailable capabilities fail the run. `GCC_CXX=/absolute/path/to/g++` selects GCC, with `GNU_CXX` retained as a fallback. `CLANG_CXX` selects Clang. The macOS Clang `g++` alias is not accepted as GCC. `sh test/run_host_checks.sh` is also supported.
+
 Individual gates are also available:
 
 ```bash
@@ -1078,7 +1089,7 @@ The deterministic suite covers:
 - multiple-button independence;
 - freshness/change sequences;
 - malformed indices;
-- PW_PVT-style context callbacks;
+- application context callbacks;
 - complete small state truth tables.
 
 The GitHub Actions matrix separately compiles portable usage across the supported board families and compiles the public examples for ESP32-S3.
@@ -1149,9 +1160,9 @@ Legacy global aliases remain available unless `UB_NO_LEGACY_CONFIG_GLOBALS` is d
 
 ---
 
-## PW_PVT-style integration
+## Application integration
 
-Universal_Button remains independent of PW_PVT, but v2's contracts are designed to fit a mature provider architecture cleanly.
+Universal_Button separates input acquisition from application policy and transport.
 
 A useful adapter shape is:
 
@@ -1168,12 +1179,12 @@ Universal_Button
                  ↓
 application adapter / transport
                  ↓
-SafetyCore / AuthorityRouter / UI logic
+application safety policy / UI logic
 ```
 
 ### Stable button state
 
-A latest-state transport such as SnapshotBus should carry stable debounced state and durable metadata.
+A latest-state transport should carry stable debounced state and durable metadata.
 
 It should **not** rely on a one-cycle event bit surviving scheduling delays.
 
@@ -1265,7 +1276,7 @@ Universal_Button/
 Current version:
 
 ```text
-2.0.0
+2.0.1
 ```
 
 See [CHANGELOG.md](CHANGELOG.md) for detailed release history.

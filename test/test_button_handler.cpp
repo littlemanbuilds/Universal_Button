@@ -499,6 +499,151 @@ namespace
         CHECK(b.latchChangeSequence(0u) == 1u);
         CHECK(b.getAndClearLatchedChanged(0u));
         CHECK(!b.getAndClearLatchedChanged(0u));
+        CHECK(b.inputStatus(0u).latch_change_sequence == 1u);
+        CHECK(b.pendingEventCount() == 1u);
+        const uint32_t events = b.eventSequence();
+        CHECK(b.resetAndSync());
+        CHECK(!b.isLatched(0u));
+        CHECK(b.latchChangeSequence(0u) == 2u);
+        CHECK(b.inputStatus(0u).latch_change_sequence == 2u);
+        CHECK(!b.getAndClearLatchedChanged(0u));
+        CHECK(b.pendingEventCount() == 0u);
+        CHECK(b.eventSequence() == events);
+    }
+
+    template <size_t N>
+    void checkLatch(const ButtonHandler<N> &b, uint8_t id, bool value, uint32_t sequence)
+    {
+        CHECK(b.isLatched(id) == value);
+        CHECK(b.latchChangeSequence(id) == sequence);
+        CHECK(b.inputStatus(id).latch_change_sequence == sequence);
+    }
+
+    void testLatchDisableLifecycle()
+    {
+        beginTest("disable paths count actual latch transitions and preserve queued interactions");
+        for (int configDisable = 0; configDisable < 2; ++configDisable)
+        {
+            Source s;
+            const uint8_t pins[] = {0u, 1u};
+            const ButtonTimingConfig timing{0u, 1u, 5u, 1u};
+            ButtonHandler<2> b(pins, &checkedLogicalCtx, &s, timing);
+            CHECK(b.sync(0u));
+            checkLatch(b, 0u, false, 0u);
+            checkLatch(b, 1u, false, 0u);
+            s.state[0] = true; b.update(1u);
+            s.state[0] = false; b.update(2u);
+            b.update(4u);
+            CHECK(b.pendingEventCount() == 1u);
+            const uint32_t events = b.eventSequence();
+            const uint32_t generation = b.generation(0u);
+            b.setLatched(0u, true);
+            b.setLatched(1u, true);
+            CHECK(b.getAndClearLatchedChanged(1u));
+            ButtonPerConfig disabled{};
+            disabled.enabled = false;
+            for (int repeat = 0; repeat < 2; ++repeat)
+            {
+                CHECK(configDisable ? b.setPerConfig(0u, disabled) : b.enable(0u, false));
+                checkLatch(b, 0u, false, 2u);
+                checkLatch(b, 1u, true, 1u);
+                CHECK(!b.getAndClearLatchedChanged(0u));
+                CHECK(!b.getAndClearLatchedChanged(1u));
+                CHECK(b.generation(0u) == generation);
+                CHECK(b.eventSequence() == events);
+                CHECK(b.pendingEventCount() == 1u);
+            }
+            ButtonEvent event{};
+            CHECK(b.popEvent(event));
+            CHECK(event.button_id == 0u && event.type == ButtonEventType::Short);
+            CHECK(event.sequence == events);
+            CHECK(b.enable(0u, true));
+            CHECK(b.enable(0u, false)); // An already false latch does not change.
+            checkLatch(b, 0u, false, 2u);
+
+            // Manual latch control is allowed while disabled. Failed re-enable
+            // clears that latch even though no new input baseline was acquired.
+            b.setLatched(0u, true);
+            s.valid[0] = false;
+            CHECK(!b.enable(0u, true));
+            checkLatch(b, 0u, false, 4u);
+            CHECK(!b.inputStatus(0u).enabled);
+            CHECK(!b.getAndClearLatchedChanged(0u));
+            CHECK(!b.enable(0u, true));
+            checkLatch(b, 0u, false, 4u);
+            CHECK(b.pendingEventCount() == 0u);
+            CHECK(b.eventSequence() == events);
+        }
+    }
+
+    void testLatchResetLifecycle()
+    {
+        beginTest("reset restores either initial latch once, even when synchronization fails");
+        for (int initial = 0; initial < 2; ++initial)
+        for (int succeeds = 0; succeeds < 2; ++succeeds)
+        for (int voidReset = 0; voidReset < 2; ++voidReset)
+        {
+            Source s;
+            const uint8_t pins[] = {0u, 1u};
+            ButtonHandler<2> b(pins, &checkedLogicalCtx, &s, kTiming);
+            checkLatch(b, 0u, false, 0u); // Construction has no prior transition.
+            CHECK(!b.getAndClearLatchedChanged(0u));
+            ButtonPerConfig config{};
+            config.latch_initial = initial != 0;
+            CHECK(b.setPerConfig(0u, config));
+            checkLatch(b, 0u, false, 0u); // Configuration alone does not restore it.
+            b.setLatched(0u, initial == 0);
+            const uint32_t before = b.latchChangeSequence(0u);
+            s.valid[0] = succeeds != 0;
+            for (int repeat = 0; repeat < 2; ++repeat)
+            {
+                if (voidReset)
+                    b.reset();
+                else
+                    CHECK(b.resetAndSync() == (succeeds != 0));
+                checkLatch(b, 0u, initial != 0, before + 1u);
+                checkLatch(b, 1u, false, 0u);
+                CHECK(!b.getAndClearLatchedChanged(0u));
+                CHECK(b.valid(0u) == (succeeds != 0));
+                CHECK(b.valid(1u) == (succeeds != 0));
+                CHECK(b.pendingEventCount() == 0u);
+                CHECK(b.eventSequence() == 0u);
+            }
+        }
+    }
+
+    void testManualLatchAccounting()
+    {
+        beginTest("manual latch operations keep durable counters independent of consumable flags");
+        Source s;
+        const uint8_t pins[] = {0u, 1u};
+        ButtonHandler<2> b(pins, &checkedLogicalCtx, &s, kTiming);
+        b.setLatched(0u, true);
+        b.setLatched(0u, true);
+        b.setLatched(1u, true);
+        checkLatch(b, 0u, true, 1u);
+        CHECK(b.getAndClearLatchedChanged(0u));
+        CHECK(!b.getAndClearLatchedChanged(0u));
+        checkLatch(b, 0u, true, 1u);
+        b.clearLatchedMask(1u);
+        b.clearLatchedMask(1u);
+        checkLatch(b, 0u, false, 2u);
+        checkLatch(b, 1u, true, 1u);
+        b.clearAllLatched();
+        b.clearAllLatched();
+        checkLatch(b, 0u, false, 2u);
+        checkLatch(b, 1u, false, 2u);
+        CHECK(b.getAndClearLatchedChanged(0u));
+        CHECK(b.getAndClearLatchedChanged(1u));
+        b.setLatched(255u, true);
+        CHECK(!b.enable(255u, false));
+        CHECK(!b.setPerConfig(255u, ButtonPerConfig{}));
+        checkLatch(b, 255u, false, 0u);
+        checkLatch(b, 0u, false, 2u);
+        checkLatch(b, 1u, false, 2u);
+        CHECK(!b.getAndClearLatchedChanged(255u));
+        CHECK(b.pendingEventCount() == 0u);
+        CHECK(b.eventSequence() == 0u);
     }
 
     void testResetAndSyncPreservesHeldLevelWithoutEvent()
@@ -597,9 +742,9 @@ namespace
         CHECK(!b.enable(9u, false));
     }
 
-    void testPW_PVTCallbackShape()
+    void testContextCallbackShape()
     {
-        beginTest("PW_PVT-style context callback returning asserted state works with default per config");
+        beginTest("Context callback returning asserted state works with default per config");
         Source mcp;
         const uint8_t pins[4] = {0u, 1u, 2u, 3u};
         ButtonHandler<4> buttons(pins, &logicalCtx, &mcp,
@@ -733,12 +878,15 @@ int main()
     testEventOverflowIsExplicit();
     testLegacyApiDrainsLongStarted();
     testLatchingAndDurableLatchSequence();
+    testLatchDisableLifecycle();
+    testLatchResetLifecycle();
+    testManualLatchAccounting();
     testResetAndSyncPreservesHeldLevelWithoutEvent();
     testMillisWraparound();
     testMultipleButtonsIndependentTiming();
     testStatusSequencesAndFreshness();
     testBoundsFailClosed();
-    testPW_PVTCallbackShape();
+    testContextCallbackShape();
     testExternalInvalidationContract();
     testInteractionBoundarySweep();
     testFourButtonStateSweep();

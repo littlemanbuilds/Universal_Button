@@ -1,6 +1,6 @@
 {
   "name": "Universal_Button",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "Debounced multi-button input with explicit reader validity, preserved interaction events, long-hold state, synchronized recovery and optional latching.",
   "keywords": [
     "button",

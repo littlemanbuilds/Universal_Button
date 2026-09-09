@@ -69,6 +69,7 @@ namespace UB
 
         /**
          * @brief Alias to std::enable_if when available.
+         *
          * @tparam B Compile-time boolean condition.
          * @tparam T Resulting type if condition is true.
          */
@@ -77,6 +78,7 @@ namespace UB
 
         /**
          * @brief Alias to std::is_enum when available.
+         *
          * @tparam T Type to query.
          */
         template <typename T>
@@ -86,6 +88,7 @@ namespace UB
 
         /**
          * @brief Minimal enable_if implementation for toolchains without <type_traits>.
+         *
          * @tparam B Compile-time boolean condition.
          * @tparam T Resulting type if condition is true.
          */
@@ -96,6 +99,7 @@ namespace UB
 
         /**
          * @brief enable_if specialization for true conditions.
+         *
          * @tparam T Resulting type when condition is satisfied.
          */
         template <typename T>
@@ -111,6 +115,7 @@ namespace UB
 
         /**
          * @brief Minimal enum detection using a compiler intrinsic.
+         *
          * @tparam T Type to query.
          */
         template <typename T>
@@ -123,6 +128,7 @@ namespace UB
 
         /**
          * @brief Fallback enum detection for unsupported toolchains.
+         *
          * @note Returns false on unsupported compilers.
          * @tparam T Type to query.
          */
@@ -167,6 +173,7 @@ namespace UB
 
             /**
              * @brief Set or clear an individual bit.
+             *
              * @param i Bit index.
              * @param v New bit value.
              */
@@ -186,6 +193,7 @@ namespace UB
 
             /**
              * @brief Test whether a bit is set.
+             *
              * @param i Bit index.
              * @return True if bit is set; false otherwise.
              */
@@ -201,6 +209,7 @@ namespace UB
 
             /**
              * @brief Get the number of bits.
+             *
              * @return Number of bits in this bitset.
              * @note Kept for parity with std::bitset and external helper usage.
              */

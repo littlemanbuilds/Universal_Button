@@ -2,6 +2,17 @@
 
 All notable changes to Universal_Button are documented here.
 
+## [2.0.1] - 2026-09-09
+
+### Fixed
+
+- Durable latch-change sequences now count actual changes during direct/configuration disabling, failed re-enable cleanup and reset restoration, including failed synchronization. Construction still starts at zero; lifecycle cleanup still clears the legacy change flag without generating interaction events.
+
+### Changed
+
+- Clarified latch lifecycle documentation and reader examples, and completed public callable contracts.
+- Host validation now requires genuine GNU GCC, Clang and both address/undefined-behavior sanitizers; the entry point also accepts `sh` invocation.
+
 ## [2.0.0] - 2026-08-07
 
 ### Changed
@@ -42,9 +53,9 @@ All notable changes to Universal_Button are documented here.
 
 ### Compatibility notes
 
-- PW_PVT's existing context callback shape remains source-compatible and now receives the logical-pressed behavior its callback documentation already expected.
-- PW_PVT's MCP failure path should change from `buttons.reset()` to `buttons.invalidate(...)` when PW_PVT itself is updated, because v2 reset semantics intentionally synchronize hardware rather than force a released state.
+- Existing application context callbacks remain source-compatible and now receive the documented logical-pressed behavior.
+- Applications using `buttons.reset()` for an MCP acquisition failure should use `buttons.invalidate(...)` instead, because v2 reset semantics synchronize hardware rather than force a released state.
 
 ## [1.7.0]
 
-- Previous release supplied in the project archive.
+- Earlier release; detailed changes are not recorded here.

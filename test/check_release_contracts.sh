@@ -8,11 +8,22 @@ mkdir -p "$BUILD"
 fail() { echo "release-contract failure: $*" >&2; exit 1; }
 
 # ---- Version consistency ----
-grep -q '^version=2.0.0$' "$ROOT/library.properties" || fail "library.properties version"
-grep -q '^includes=Universal_Button.h$' "$ROOT/library.properties" || fail "library.properties includes should expose only umbrella header"
-grep -q '"version": "2.0.0"' "$ROOT/library.json" || fail "library.json version"
-grep -q '#define UNIVERSAL_BUTTON_VERSION "2.0.0"' "$ROOT/src/Universal_Button.h" || fail "library-specific version macro"
-grep -q '#define UNIVERSAL_BUTTON_VERSION_MAJOR 2' "$ROOT/src/Universal_Button.h" || fail "library-specific major macro"
+python3 - "$ROOT" <<'PY_VERSION'
+import json
+import re
+import sys
+from pathlib import Path
+root = Path(sys.argv[1])
+properties = dict(line.split("=", 1) for line in (root / "library.properties").read_text().splitlines() if "=" in line)
+version = properties["version"]
+assert re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", version), "invalid package version"
+assert properties["includes"] == "Universal_Button.h", "umbrella include contract"
+assert json.loads((root / "library.json").read_text())["version"] == version, "JSON version mismatch"
+header = (root / "src/Universal_Button.h").read_text()
+assert re.search(r'^#define UNIVERSAL_BUTTON_VERSION "' + re.escape(version) + r'"$', header, re.M), "version macro mismatch"
+for suffix, value in zip(("MAJOR", "MINOR", "PATCH"), version.split(".")):
+    assert re.search(r"^#define UNIVERSAL_BUTTON_VERSION_" + suffix + r"\s+" + value + r"$", header, re.M), suffix + " macro mismatch"
+PY_VERSION
 ! grep -Eq '^#define[[:space:]]+LIBRARY_VERSION([_[:space:]])' "$ROOT/src/Universal_Button.h" || fail "generic LIBRARY_VERSION aliases must remain absent"
 
 # ---- Required documentation flow ----
@@ -21,7 +32,7 @@ for heading in '# Universal_Button' '## Contents' '## Beginner path' '## Install
 done
 grep -Fq './test/run_host_checks.sh' "$ROOT/README.md" || fail "README missing one-command host validation"
 
-# ---- Audit remediation markers ----
+# ---- Required public API contracts ----
 grep -q 'LongStarted' "$ROOT/src/ButtonTypes.h" || fail "LongStarted missing"
 grep -q 'ButtonPressedResult' "$ROOT/src/ButtonTypes.h" || fail "pressed result missing"
 grep -q 'ButtonLevelResult' "$ROOT/src/ButtonTypes.h" || fail "level result missing"

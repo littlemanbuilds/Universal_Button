@@ -16,6 +16,8 @@
     X(TestButton2, 7)  \
     X(TestButton3, 8)
 
+// Use the namespaced mapping without duplicate legacy global names.
+#define UB_NO_LEGACY_CONFIG_GLOBALS
 #include <Universal_Button.h>
 #include <Universal_Button_Utils.h>
 
@@ -23,19 +25,19 @@
 #include <Wire.h>
 #include <Adafruit_MCP23X17.h>
 
-namespace ubcfg = UB::config; ///< Shorter name for the button list above.
+using namespace UB::config;
 
 // MCP23017 wiring/config.
 constexpr uint8_t MCP_ADDR = 0x20;
 
 // Map each logical button (by enum order) to MCP pin 0..15 (0..7=A, 8..15=B).
-constexpr uint8_t MCP_PINS[ubcfg::NUM_BUTTONS] = {
+constexpr uint8_t MCP_PINS[NUM_BUTTONS] = {
     0, ///< TestButton1 -> GPA0.
     1, ///< TestButton2 -> GPA1.
     8  ///< TestButton3 -> GPB0.
 };
-static_assert(ubcfg::NUM_BUTTONS == (sizeof(MCP_PINS) / sizeof(MCP_PINS[0])),
-              "MCP_PINS size must match ubcfg::NUM_BUTTONS");
+static_assert(NUM_BUTTONS == (sizeof(MCP_PINS) / sizeof(MCP_PINS[0])),
+              "MCP_PINS size must match NUM_BUTTONS");
 
 // Custom timings (debounce, short, long) in milliseconds.
 constexpr ButtonTimingConfig kTiming{50, 300, 1500};
@@ -45,23 +47,17 @@ static Adafruit_MCP23X17 mcp;
 // Snapshot of both MCP ports, refreshed once per loop.
 struct McpSnapshot
 {
-    uint8_t A{0xFF};
-    uint8_t B{0xFF};
+    uint16_t gpioAB{0xFFFF}; ///< GPIOA in bits 0..7, GPIOB in bits 8..15.
 
-    inline uint8_t getBit(uint8_t pin) const
-    {
-        return (pin < 8) ? ((A >> pin) & 0x01) : ((B >> (pin - 8)) & 0x01);
-    }
-
-    // Convenience: true if the pin reads LOW (pressed with pull-ups).
-    inline bool isLow(uint8_t pin) const { return getBit(pin) == 0; }
+    // True if the mapped MCP pin reads LOW (pressed with pull-ups).
+    bool isLow(uint8_t pin) const { return (gpioAB & (1u << pin)) == 0u; }
 } snap;
 
 // Reader that uses the cached snapshot (pressed == LOW).
 static bool readFromSnapshot(uint8_t key)
 {
     const uint8_t idx = UB::util::indexFromKey(key);
-    if (idx < ubcfg::NUM_BUTTONS)
+    if (idx < NUM_BUTTONS)
     {
         return snap.isLow(MCP_PINS[idx]);
     }
@@ -74,7 +70,7 @@ static Button btns = makeButtonsWithReader(readFromSnapshot, kTiming, /*skipPinI
 // Configure MCP button pins once.
 static void configureMcpPins()
 {
-    for (uint8_t i = 0; i < ubcfg::NUM_BUTTONS; ++i)
+    for (size_t i = 0; i < NUM_BUTTONS; ++i)
     {
         const uint8_t p = MCP_PINS[i];
         mcp.pinMode(p, INPUT_PULLUP);
@@ -109,21 +105,21 @@ void setup()
     // tBtn3.active_low = true; ///< Default remains LOW=pressed.
     // tBtn3.enabled = true; ///< Default remains enabled.
 
-    btns.setPerConfig(static_cast<uint8_t>(ubcfg::ButtonIndex::TestButton3), tBtn3);
+    btns.setPerConfig(ButtonIndex::TestButton3, tBtn3);
 }
 
 void loop()
 {
-    // v2 API: read both ports in one 16-bit read.
-    uint16_t ab = mcp.readGPIOAB(); ///< [low byte]=A, [high byte]=B.
-    snap.A = static_cast<uint8_t>(ab & 0x00FF);
-    snap.B = static_cast<uint8_t>((ab >> 8) & 0x00FF);
+    // One transaction keeps all button reads in this update on the same snapshot.
+    // This bool reader cannot detect bus failure; use a result reader when
+    // the acquisition layer can report whether its cached data is trustworthy.
+    snap.gpioAB = mcp.readGPIOAB();
 
     btns.update();
 
-    const ButtonPressType btn1 = btns.getPressType(ubcfg::ButtonIndex::TestButton1);
-    const ButtonPressType btn2 = btns.getPressType(ubcfg::ButtonIndex::TestButton2);
-    const ButtonPressType btn3 = btns.getPressType(ubcfg::ButtonIndex::TestButton3);
+    const ButtonPressType btn1 = btns.getPressType(ButtonIndex::TestButton1);
+    const ButtonPressType btn2 = btns.getPressType(ButtonIndex::TestButton2);
+    const ButtonPressType btn3 = btns.getPressType(ButtonIndex::TestButton3);
 
     if (btn1 == ButtonPressType::Short)
         Serial.println("TestButton1: Short press...");

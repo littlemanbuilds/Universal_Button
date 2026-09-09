@@ -16,11 +16,13 @@
     X(BtnReset, 8)     \
     X(BtnToggle, 9) ///< INPUT_PULLUP (pressed == LOW).
 
+// Use the namespaced mapping without duplicate legacy global names.
+#define UB_NO_LEGACY_CONFIG_GLOBALS
 #include <Universal_Button.h>
 
 #include <Arduino.h>
 
-namespace ubcfg = UB::config; ///< Shorter name for the button list above.
+using namespace UB::config;
 
 /**
  * Timing (ms): debounce, short, long, double-click-gap.
@@ -32,7 +34,7 @@ constexpr ButtonTimingConfig kTiming{
     400  ///< Double_click_ms
 };
 
-// Create handler sized to ubcfg::NUM_BUTTONS from mapping above, with custom timing.
+// Create handler sized to NUM_BUTTONS from mapping above, with custom timing.
 static Button btns = makeButtons(kTiming);
 
 static const __FlashStringHelper *toStr(ButtonPressType e)
@@ -84,7 +86,7 @@ void setup()
         pc.latch_mode = LatchMode::Set;
         pc.latch_on = LatchTrigger::Short;
         pc.latch_initial = false;
-        btns.setPerConfig(ubcfg::ButtonIndex::BtnSet, pc);
+        btns.setPerConfig(ButtonIndex::BtnSet, pc);
     }
 
     // BtnReset: command button. Long => clear all latches.
@@ -96,9 +98,12 @@ void setup()
         pc.latch_mode = LatchMode::Toggle;
         pc.latch_on = LatchTrigger::Double;
         pc.latch_initial = false;
-        btns.setPerConfig(ubcfg::ButtonIndex::BtnToggle, pc);
+        btns.setPerConfig(ButtonIndex::BtnToggle, pc);
     }
 
+    // Reset restores latch_initial and clears the consumable changed flags.
+    // latchChangeSequence(index) still counts actual changes, even on failed sync;
+    // independent consumers can compare their own saved sequence values.
     btns.reset();
 }
 
@@ -107,10 +112,10 @@ void loop()
     btns.update();
 
     // Read events (consume-on-read).
-    const ButtonPressType eMom = btns.getPressType(ubcfg::ButtonIndex::BtnMomentary);
-    const ButtonPressType eSet = btns.getPressType(ubcfg::ButtonIndex::BtnSet);
-    const ButtonPressType eReset = btns.getPressType(ubcfg::ButtonIndex::BtnReset);
-    const ButtonPressType eToggle = btns.getPressType(ubcfg::ButtonIndex::BtnToggle);
+    const ButtonPressType eMom = btns.getPressType(ButtonIndex::BtnMomentary);
+    const ButtonPressType eSet = btns.getPressType(ButtonIndex::BtnSet);
+    const ButtonPressType eReset = btns.getPressType(ButtonIndex::BtnReset);
+    const ButtonPressType eToggle = btns.getPressType(ButtonIndex::BtnToggle);
 
     // Momentary.
     if (eMom != ButtonPressType::None)
@@ -121,7 +126,7 @@ void loop()
     // Set behavior.
     if (eSet == ButtonPressType::Short)
     {
-        printLatchLine(F("BtnSet"), eSet, btns.isLatched(ubcfg::ButtonIndex::BtnSet)); ///< Short triggers latch ON; show full line.
+        printLatchLine(F("BtnSet"), eSet, btns.isLatched(ButtonIndex::BtnSet)); ///< Short triggers latch ON; show full line.
     }
     else if (eSet != ButtonPressType::None)
     {
@@ -142,7 +147,7 @@ void loop()
     // Toggle behavior.
     if (eToggle == ButtonPressType::Double)
     {
-        printLatchLine(F("BtnToggle"), eToggle, btns.isLatched(ubcfg::ButtonIndex::BtnToggle)); ///< Double toggles latch.
+        printLatchLine(F("BtnToggle"), eToggle, btns.isLatched(ButtonIndex::BtnToggle)); ///< Double toggles latch.
     }
     else if (eToggle != ButtonPressType::None)
     {

@@ -13,7 +13,7 @@
 
 #include <Arduino.h>
 
-enum class LocalButton : uint8_t
+enum class LocalButton
 {
     TestButton1,
     TestButton2,

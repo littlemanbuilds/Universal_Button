@@ -13,9 +13,9 @@ CXX=clang++ ./test/run_native_tests.sh
 ./test/check_release_contracts.sh
 ```
 
-`run_host_checks.sh` runs the complete host-side validation suite in the normal release order.
+`run_host_checks.sh` (also callable with `sh`) requires genuine GNU GCC, Clang, ASan and UBSan. Missing capabilities fail. Set `GCC_CXX` to a GCC executable, including an absolute path outside PATH; `GNU_CXX` is a compatible fallback. `CLANG_CXX` selects Clang. A Clang-based `g++` alias does not count as GCC.
 
-`run_native_tests.sh` uses a deterministic host-side input model so debounce, interaction timing, recovery and rollover cases can be exercised without waiting on physical hardware.
+`run_native_tests.sh` uses a deterministic host-side input model so debounce, interaction timing, recovery, latch lifecycle accounting and rollover cases can be exercised without waiting on physical hardware.
 
 `run_sanitizers.sh` repeats the contract suite with AddressSanitizer and UndefinedBehaviorSanitizer.
 

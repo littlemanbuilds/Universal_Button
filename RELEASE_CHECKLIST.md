@@ -1,6 +1,6 @@
 # Universal_Button Release Checklist
 
-Use this checklist before publishing a release.
+Use this checklist before publishing 2.0.1. Unchecked physical, CI and archive checks still require release validation.
 
 ## Source and API
 
@@ -11,6 +11,7 @@ Use this checklist before publishing a release.
 - [ ] Validity-aware reader failures retain stable state and report invalid health.
 - [ ] Runtime reconfiguration synchronizes without synthetic events.
 - [ ] `reset()` / `resetAndSync()` baseline current hardware.
+- [ ] Disable/reset latch changes advance the durable counter exactly once, even on failed synchronization; lifecycle flags still clear.
 - [ ] `invalidate()` produces edge-free recovery on the next valid acquisition.
 - [ ] Detailed event queue reports overflow/loss explicitly.
 - [ ] `LongStarted`, `LongReleased` and `isLongHeld()` semantics match README/tests.
@@ -19,13 +20,13 @@ Use this checklist before publishing a release.
 
 - [ ] README contains Introduction/Contents/Installation/Beginner path/API/Testing/Migration sections.
 - [ ] Every public example remains beginner-readable and ESP32-S3 appropriate.
-- [ ] Every source/example file uses the LMB Doxygen header style.
+- [ ] Public source and examples document callable behavior, wiring and limitations.
 - [ ] README migration notes explain callback semantics and explicit `BUTTON_LIST` requirement.
 - [ ] `keywords.txt` covers the public v2 API.
 
 ## Validation
 
-- [ ] `./test/run_host_checks.sh`
+- [ ] `./test/run_host_checks.sh` requires GNU GCC, Clang, ASan and UBSan, with no skipped capabilities.
 - [ ] `./test/run_native_tests.sh`
 - [ ] `CXX=clang++ ./test/run_native_tests.sh`
 - [ ] `./test/run_sanitizers.sh`

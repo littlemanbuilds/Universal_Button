@@ -24,6 +24,7 @@ namespace UB
 #ifndef UB_UTIL_NO_CONFIG_MAP
         /**
          * @brief Map a configured BUTTON_LIST key/pin value to its logical index.
+         *
          * @param key Configured key/pin value.
          * @return 0..NUM_BUTTONS-1 on success, or 0xFF when the key is not mapped.
          */
@@ -39,6 +40,7 @@ namespace UB
 
         /**
          * @brief Map a key/pin value within an explicit array to its logical index.
+         *
          * @tparam N Array length.
          * @param pins Explicit key/pin array.
          * @param key Key/pin value to find.
