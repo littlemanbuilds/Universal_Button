@@ -2,6 +2,11 @@
 
 All notable changes to Universal_Button are documented here.
 
+## [2.0.3] - 2026-11-27
+
+- Restrict the PlatformIO package to an explicit list of public files and verify the packed contents during CI.
+- Document the dependencies and wiring for the two MCP23017 examples.
+
 ## [2.0.2] - 2026-09-09
 
 ### Fixed

@@ -1,6 +1,6 @@
 {
   "name": "Universal_Button",
-  "version": "2.0.2",
+  "version": "2.0.3",
   "description": "Debounced multi-button input with explicit reader validity, preserved interaction events, long-hold state, synchronized recovery and optional latching.",
   "keywords": [
     "button",
@@ -45,6 +45,29 @@
   ],
   "build": {
     "includeDir": "src"
+  },
+  "export": {
+    "include": [
+      "CHANGELOG.md",
+      "LICENSE",
+      "README.md",
+      "examples/01_BasicButton/01_BasicButton.ino",
+      "examples/02_PressType/02_PressType.ino",
+      "examples/03_LocalEnum/03_LocalEnum.ino",
+      "examples/04_PortExpander/04_PortExpander.ino",
+      "examples/05_CachedRead/05_CachedRead.ino",
+      "examples/06_Latching/06_Latching.ino",
+      "keywords.txt",
+      "library.json",
+      "library.properties",
+      "src/ButtonCompatibility.h",
+      "src/ButtonHandler.h",
+      "src/ButtonHandler_Config.h",
+      "src/ButtonTypes.h",
+      "src/IButtonHandler.h",
+      "src/Universal_Button.h",
+      "src/Universal_Button_Utils.h"
+    ]
   },
   "examples": [
     "examples/01_BasicButton/01_BasicButton.ino",

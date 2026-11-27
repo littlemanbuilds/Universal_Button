@@ -35,7 +35,7 @@ jobs:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
         with:
-          python-version: "3.x"
+          python-version: "3.11"
       - name: Install PlatformIO
         run: python -m pip install platformio==6.1.19
       - name: Compile portable smoke sketch
@@ -48,9 +48,13 @@ jobs:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
         with:
-          python-version: "3.x"
+          python-version: "3.11"
       - name: Install PlatformIO
         run: python -m pip install platformio==6.1.19
+      - name: Verify PlatformIO package inventory
+        run: |
+          python -B test/check_distribution.py index
+          python -B test/check_distribution.py regression --pio pio
       - name: Compile public examples
         shell: bash
         run: |

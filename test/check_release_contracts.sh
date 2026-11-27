@@ -8,7 +8,8 @@ mkdir -p "$BUILD"
 fail() { echo "release-contract failure: $*" >&2; exit 1; }
 
 # ---- Version consistency ----
-python3 - "$ROOT" <<'PY_VERSION'
+python3 -B - "$ROOT" <<'PY_VERSION'
+from datetime import date
 import json
 import re
 import sys
@@ -23,6 +24,14 @@ header = (root / "src/Universal_Button.h").read_text()
 assert re.search(r'^#define UNIVERSAL_BUTTON_VERSION "' + re.escape(version) + r'"$', header, re.M), "version macro mismatch"
 for suffix, value in zip(("MAJOR", "MINOR", "PATCH"), version.split(".")):
     assert re.search(r"^#define UNIVERSAL_BUTTON_VERSION_" + suffix + r"\s+" + value + r"$", header, re.M), suffix + " macro mismatch"
+readme = (root / "README.md").read_text()
+assert re.search(r"^## Version history\n.*?^\x60\x60\x60text\n" + re.escape(version) + r"\n\x60\x60\x60$", readme, re.M | re.S), "README version mismatch"
+assert "littlemanbuilds/Universal_Button@^" + version + "\n" in readme, "PlatformIO install version mismatch"
+changelog = (root / "CHANGELOG.md").read_text()
+entries = re.findall(r"^## \[([^\]]+)\] - ([^\n]+)$", changelog, re.M)
+assert entries and entries[0][0] == version, "current changelog version mismatch"
+assert sum(entry[0] == version for entry in entries) == 1, "duplicate current changelog entry"
+date.fromisoformat(entries[0][1])
 PY_VERSION
 ! grep -Eq '^#define[[:space:]]+LIBRARY_VERSION([_[:space:]])' "$ROOT/src/Universal_Button.h" || fail "generic LIBRARY_VERSION aliases must remain absent"
 

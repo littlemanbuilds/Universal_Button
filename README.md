@@ -18,7 +18,7 @@ Universal_Button handles the repetitive parts of button input that become surpri
 
 ESP32-S3 is the primary development target, but the core remains intentionally portable.
 
-**2.0.2 fixes default mapping linkage in multi-file applications.** The latch accounting fixes from 2.0.1 and reader, event and synchronization features from 2.0.0 remain available.
+**2.0.3 restricts the PlatformIO package to the library, public examples and user documentation.** It retains the default mapping linkage fix from 2.0.2.
 
 > **Since v2.0.0:** if you include `Universal_Button.h`, you must explicitly define your button mapping. The old silent GPIO25 fallback has been removed.
 
@@ -141,7 +141,7 @@ Add the library to your project dependencies:
 
 ```ini
 lib_deps =
-    littlemanbuilds/Universal_Button@^2.0.2
+    littlemanbuilds/Universal_Button@^2.0.3
 ```
 
 ### Manual installation
@@ -166,6 +166,8 @@ The implementation is standard C++11 and avoids dynamic allocation.
 - STM32 Blue Pill.
 
 The public learning examples are primarily written for **ESP32-S3**.
+
+Examples 04 and 05 require the Adafruit MCP23017 Arduino Library and its Adafruit BusIO dependency. Install them through Arduino Library Manager or use the ESP32-S3 environment in this repository. The button library itself does not require either dependency. Connect the expander to the board's SDA and SCL pins with common ground and use I²C pull-ups to 3.3 V. With address pins A0–A2 grounded, use address `0x20`. Wire the three switches between GPA0, GPA1 and GPB0 respectively and ground.
 
 ---
 
@@ -1047,7 +1049,7 @@ The examples are intended to teach the public API, not every advanced diagnostic
 
 ## Testing
 
-The repository has a dedicated `test/` directory rather than using an old `platformio.ci.ini` pattern.
+Run the development tests from a Git checkout. The PlatformIO Registry package contains the headers and examples for application use.
 
 Run the complete host-side validation suite with:
 
@@ -1095,6 +1097,8 @@ The deterministic suite covers:
 - complete small state truth tables.
 
 The GitHub Actions matrix separately compiles portable usage across the supported board families and compiles the public examples for ESP32-S3.
+
+Version 2.0.3 is a software-qualified maintenance release. The ESP32-S3 native GPIO and MCP23017 physical smoke checks are **DEFERRED / NOT RUN** for this release. During hardware integration, verify pressed and released states on the actual GPIO wiring using Example 01. If the project uses an MCP23017, also verify the mapped inputs with both direct and cached reads using Examples 04 and 05.
 
 ---
 
@@ -1278,7 +1282,7 @@ Universal_Button/
 Current version:
 
 ```text
-2.0.2
+2.0.3
 ```
 
 See [CHANGELOG.md](CHANGELOG.md) for detailed release history.

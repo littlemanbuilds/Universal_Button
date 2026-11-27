@@ -1,6 +1,6 @@
 # Universal_Button Release Checklist
 
-Use this checklist template before publishing 2.0.2. Unchecked physical, CI and archive checks still require release validation.
+Use this checklist before publishing 2.0.3. Record results for the exact release commit and each distribution.
 
 ## Source and API
 
@@ -35,11 +35,20 @@ Use this checklist template before publishing 2.0.2. Unchecked physical, CI and 
 - [ ] `./test/check_release_contracts.sh`
 - [ ] PlatformIO portable compile matrix passes in CI.
 - [ ] ESP32-S3 public examples compile in CI.
-- [ ] Hardware smoke test performed on ESP32-S3 for native GPIO.
-- [ ] Hardware expander/cached-read example exercised when relevant.
+
+## Hardware integration
+
+Version 2.0.3 follows the software-qualified release policy for compatible maintenance updates. It retains the qualified 2.0.2 button behavior. The project hardware integrator is responsible for completing and recording these checks on the actual wiring and devices before relying on the inputs in service.
+
+| Check | Disposition | Integration requirement |
+| --- | --- | --- |
+| ESP32-S3 native GPIO | DEFERRED / NOT RUN | Verify that Example 01 reports the correct pressed and released states with the actual switch wiring. |
+| ESP32-S3 with MCP23017 | DEFERRED / NOT RUN | When using an MCP23017, verify the mapped inputs and press and release behavior with the direct and cached reads demonstrated in Examples 04 and 05. |
 
 ## Package hygiene
 
 - [ ] No `.DS_Store`, `__MACOSX`, `.pio`, build output or nested release archive.
-- [ ] Archive contains one top-level `Universal_Button/` folder.
-- [ ] Final archive is unpacked and all local validation gates rerun from the unpacked copy.
+- [ ] GitHub source ZIP and TAR contain the full reviewed source tree under one enclosing directory.
+- [ ] PlatformIO archive contains only the files in the manifest export list, at the archive root.
+- [ ] Arduino Library Manager ZIP matches the reviewed source inventory minus repository dotfiles and matches the index checksum.
+- [ ] Public archive contents match the corresponding source files and examples compile from the unpacked library.
